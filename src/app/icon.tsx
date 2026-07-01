@@ -1,7 +1,6 @@
 import { ImageResponse } from "next/og";
 
-// PitConnect favicon — cloud+chat icon from the brand logo,
-// rendered as a blue rounded square to match the brand palette.
+// AgentForge favicon — app icon rendered as a blue rounded square.
 
 export const runtime = "edge";
 export const size = { width: 32, height: 32 };

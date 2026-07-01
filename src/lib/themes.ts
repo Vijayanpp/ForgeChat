@@ -28,7 +28,7 @@ export type ThemeId = (typeof THEME_IDS)[number];
 
 export const DEFAULT_THEME: ThemeId = "cobalt";
 
-export const STORAGE_KEY = "pitconnect.theme";
+export const STORAGE_KEY = "agentforge.theme";
 
 export interface ThemeMeta {
   id: ThemeId;

@@ -217,7 +217,7 @@ export default function InboxPage() {
           ) {
             const n = new Notification(name, {
               body: newMsg.content_text?.slice(0, 100) ?? "Sent a media message",
-              icon: "/pitconnect-logo.png",
+              icon: "/agentforge-logo.png",
             });
             n.onclick = () => {
               window.focus();

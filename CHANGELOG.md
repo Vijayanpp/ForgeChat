@@ -1,6 +1,6 @@
 # Changelog
 
-User-visible changes in PitConnect. When updating, check this file for any
+User-visible changes in AgentForge. When updating, check this file for any
 **Migration required** notes and apply the matching SQL files from
 `supabase/migrations/` against your Supabase project before restarting the app.
 

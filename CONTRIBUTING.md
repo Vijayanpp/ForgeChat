@@ -1,4 +1,4 @@
-# Contributing to PitConnect
+# Contributing to AgentForge
 
 ## Reporting bugs
 
@@ -11,13 +11,13 @@ Please open an issue describing:
 
 ## Reporting security issues
 
-**Do not file security issues publicly.** Contact the Pit Solutions team directly via email to report vulnerabilities privately.
+**Do not file security issues publicly.** Open a private security advisory on the repository to report vulnerabilities.
 
 ## Development workflow
 
 ```bash
 git clone <repo-url>
-cd pitconnect
+cd agentforge
 npm install
 cp .env.local.example .env.local
 npm run dev

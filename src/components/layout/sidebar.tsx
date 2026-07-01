@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
@@ -30,6 +29,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { BrandLogo } from "@/components/brand-logo";
 import type { AccountRole } from "@/lib/auth/roles";
 
 // Per-role chip metadata used in the sidebar's account strip + the
@@ -189,16 +189,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Logo row. On mobile we put a close button here; on desktop the
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-4">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <Image
-              src="/pitconnect-logo.png"
-              alt="PitConnect"
-              width={36}
-              height={36}
-              className="rounded-full object-cover shrink-0"
-              priority
-            />
-            <span className="text-sm font-semibold text-sidebar-foreground">PitConnect</span>
+          <Link href="/dashboard" className="flex min-w-0 items-center gap-2.5">
+            <BrandLogo variant="mark" priority />
+            <span className="truncate text-sm font-semibold text-sidebar-foreground">
+              AgentForge
+            </span>
           </Link>
           <button
             type="button"

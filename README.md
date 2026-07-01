@@ -1,4 +1,4 @@
-# PitConnect — WhatsApp CRM by Pit Solutions
+# AgentForge — WhatsApp Business CRM
 
 > The all-in-one WhatsApp Business CRM for your team — shared inbox,
 > contacts, pipelines, broadcasts, and no-code automations.
@@ -24,7 +24,7 @@ See the full guide → **[SETUP.md](./SETUP.md)**
 
 ```bash
 git clone <your-repo-url>
-cd pitconnect
+cd agentforge
 npm install
 cp .env.local.example .env.local   # fill in credentials
 npm run dev
@@ -53,4 +53,4 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## License
 
-[MIT](./LICENSE) — built and maintained by **Pit Solutions**.
+[MIT](./LICENSE)

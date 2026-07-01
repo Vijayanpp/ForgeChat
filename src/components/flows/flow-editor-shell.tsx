@@ -37,7 +37,7 @@ const MOBILE_BREAKPOINT = "(max-width: 767px)";
 
 type View = "canvas" | "list";
 
-const STORAGE_KEY = "pitconnect.flowEditor.view";
+const STORAGE_KEY = "agentforge.flowEditor.view";
 
 interface Props {
   initialFlow: FlowRow;

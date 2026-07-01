@@ -1,6 +1,6 @@
-# PitConnect — Product Documentation
+# AgentForge — Product Documentation
 
-**PitConnect** is a WhatsApp Business CRM built by Pit Solutions. It connects to the official Meta WhatsApp Cloud API and gives your team a unified workspace to manage every customer conversation, contact, and sales opportunity — all from WhatsApp.
+**AgentForge** is a WhatsApp Business CRM. It connects to the official Meta WhatsApp Cloud API and gives your team a unified workspace to manage every customer conversation, contact, and sales opportunity — all from WhatsApp.
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### Shared Inbox
 
-The inbox is the heart of PitConnect. Every incoming WhatsApp message from your business number lands here in real time.
+The inbox is the heart of AgentForge. Every incoming WhatsApp message from your business number lands here in real time.
 
 - **Conversation list** — sorted by latest activity, unread count badges, search
 - **Assignment** — assign any conversation to a specific team member
@@ -50,7 +50,7 @@ Turn conversations into sales with visual deal tracking.
 
 Send WhatsApp messages at scale using Meta-approved message templates.
 
-- **Template management** — create, submit, and track approval of WhatsApp message templates directly in PitConnect
+- **Template management** — create, submit, and track approval of WhatsApp message templates directly in AgentForge
 - **Broadcast wizard** — 4-step wizard: pick template → select audience → configure variables → schedule or send
 - **Audience targeting** — send to all contacts or filter by tag
 - **Variable substitution** — personalise each message with per-recipient dynamic values (name, order number, etc.)
@@ -175,4 +175,4 @@ Meta WhatsApp Cloud API      ← Send / receive WhatsApp messages
 
 ---
 
-*Built and maintained by **Pit Solutions**.*
+*AgentForge — MIT License.*

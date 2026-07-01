@@ -144,7 +144,7 @@ function SignupPageInner() {
           <CardDescription className="text-slate-400">
             {inviteToken
               ? "Verify your email, then accept the invitation to join your team."
-              : "Get started with PitConnect"}
+              : "Get started with AgentForge"}
           </CardDescription>
         </CardHeader>
         <CardContent>

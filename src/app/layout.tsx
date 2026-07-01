@@ -14,16 +14,17 @@ const jakarta = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: {
-    default: "PitConnect",
-    template: "%s — PitConnect",
+    default: "AgentForge",
+    template: "%s — AgentForge",
   },
-  description: "WhatsApp CRM by Pit Solutions.",
+  description: "WhatsApp Business CRM — shared inbox, automations, and AI agents.",
   robots: {
     index: false,
     follow: false,
   },
   icons: {
-    icon: [{ url: "/icon" }],
+    icon: [{ url: "/agentforge-logo.png", type: "image/png" }],
+    apple: [{ url: "/agentforge-logo.png", type: "image/png" }],
   },
   formatDetection: {
     email: false,

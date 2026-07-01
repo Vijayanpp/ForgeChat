@@ -1,6 +1,6 @@
-# PitConnect — Setup Guide
+# AgentForge — Setup Guide
 
-This guide walks you through everything needed to run PitConnect locally for development and deploy it to production.
+This guide walks you through everything needed to run AgentForge locally for development and deploy it to production.
 
 ---
 
@@ -20,7 +20,7 @@ This guide walks you through everything needed to run PitConnect locally for dev
 
 ```bash
 git clone <your-repo-url>
-cd pitconnect
+cd agentforge
 npm install
 ```
 
@@ -158,7 +158,7 @@ Open [http://localhost:3000](http://localhost:3000). You'll land on the login pa
    - **Phone Number ID** — from Meta API Setup page
    - **WABA ID** — from Meta API Setup page
    - **Permanent Access Token** — from Meta
-   - **Webhook Verify Token** — any string you invent (e.g. `pitconnect_webhook_2024`)
+   - **Webhook Verify Token** — any string you invent (e.g. `agentforge_webhook_2024`)
    - **Two-step verification PIN** — 6-digit PIN set in Meta Business Manager → Phone Numbers → Two-step verification (leave blank for Meta test numbers)
 3. Click **Save Configuration**
 
@@ -190,7 +190,7 @@ npx localtunnel --port 3000
 
 1. In your Meta app → **WhatsApp → Configuration → Webhooks → Edit**
 2. **Callback URL**: `https://your-tunnel-url/api/whatsapp/webhook`
-3. **Verify Token**: the same string you set in PitConnect Settings
+3. **Verify Token**: the same string you set in AgentForge Settings
 4. Click **Verify and Save**
 5. Under **Webhook Fields**, subscribe to **`messages`**
 
@@ -278,7 +278,7 @@ npm run dev
 
 ### WhatsApp webhook verification fails
 
-- Check that the **Verify Token** in PitConnect Settings matches exactly what you entered in Meta
+- Check that the **Verify Token** in AgentForge Settings matches exactly what you entered in Meta
 - Check that your tunnel URL is active and publicly reachable
 - Check `META_APP_SECRET` is set correctly in `.env.local`
 
@@ -303,4 +303,4 @@ Your credentials are valid but the phone number isn't subscribed to your app. In
 
 ---
 
-*Built and maintained by **Pit Solutions**.*
+*AgentForge — MIT License.*
