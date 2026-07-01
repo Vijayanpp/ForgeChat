@@ -2,11 +2,11 @@
 
 import { useEffect } from "react";
 
-const BASE_TITLE = "AgentForge";
+const BASE_TITLE = "ForgeChat";
 
 /**
  * Keeps the browser tab title in sync with the total unread count.
- * Shows "(N) AgentForge" when there are unread conversations, and
+ * Shows "(N) ForgeChat" when there are unread conversations, and
  * restores the plain title when all are read.
  *
  * Accepts `unread` as a parameter so it can be co-located with the

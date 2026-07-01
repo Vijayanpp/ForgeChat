@@ -14,17 +14,17 @@ const jakarta = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: {
-    default: "AgentForge",
-    template: "%s — AgentForge",
+    default: "ForgeChat",
+    template: "%s — ForgeChat",
   },
-  description: "WhatsApp Business CRM — shared inbox, automations, and AI agents.",
+  description: "AI-Powered WhatsApp CRM",
   robots: {
     index: false,
     follow: false,
   },
   icons: {
-    icon: [{ url: "/agentforge-logo.png", type: "image/png" }],
-    apple: [{ url: "/agentforge-logo.png", type: "image/png" }],
+    icon: [{ url: "/forgechat-logo.png", type: "image/png" }],
+    apple: [{ url: "/forgechat-logo.png", type: "image/png" }],
   },
   formatDetection: {
     email: false,
