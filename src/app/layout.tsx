@@ -87,7 +87,15 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }}
         />
       </head>
-      <body className="min-h-full bg-background text-foreground font-sans">
+      <body
+        className="min-h-full bg-background text-foreground font-sans"
+        // Browser extensions (Grammarly, LastPass, translators, etc.)
+        // inject attributes like data-gr-ext-installed into <body> before
+        // React hydrates. That's an unavoidable client-only mismatch on
+        // this element, not a real bug, so we suppress the warning here
+        // — it still surfaces for genuine mismatches in the children.
+        suppressHydrationWarning
+      >
         <ThemeProvider>
           {children}
           <Toaster

@@ -1,4 +1,5 @@
 import type { AccountRole } from "@/lib/auth/roles";
+import type { PlanId, SubscriptionStatus } from "@/lib/billing/plans";
 
 export interface Profile {
   id: string;
@@ -49,6 +50,16 @@ export interface Account {
   owner_user_id: string;
   created_at: string;
   updated_at: string;
+  /** Subscription tier (migration 025). */
+  plan_id: PlanId;
+  subscription_status: SubscriptionStatus;
+  /** Set only while `subscription_status === 'trialing'`. */
+  trial_ends_at?: string | null;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
+  razorpay_customer_id?: string | null;
+  razorpay_subscription_id?: string | null;
+  billing_email?: string | null;
 }
 
 /**
@@ -195,7 +206,6 @@ export interface Message {
   interactive_reply_id?: string;
   /** Set when a bot message was sent by an AI agent automation step. */
   ai_agent_id?: string | null;
-  ai_agent?: { name: string } | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';

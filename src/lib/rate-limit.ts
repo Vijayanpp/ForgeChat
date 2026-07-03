@@ -141,6 +141,9 @@ export const RATE_LIMITS = {
    *  while still bounding accidental abuse from a script run in a
    *  loop or a compromised admin session spamming role flips. */
   adminAction: { limit: 30, windowMs: 60_000 },
+  /** Owner-only billing actions: create/cancel a Razorpay subscription.
+   *  Low ceiling — legitimate use is a handful of clicks, ever. */
+  billingAction: { limit: 10, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

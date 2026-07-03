@@ -9,6 +9,7 @@ import {
   Palette,
   UsersRound,
   Coins,
+  CreditCard,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
@@ -20,6 +21,7 @@ import { SessionsCard } from '@/components/settings/sessions-card';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { MembersTab } from '@/components/settings/members-tab';
 import { DealsSettings } from '@/components/settings/deals-settings';
+import { BillingTab } from '@/components/settings/billing-tab';
 
 const TAB_VALUES = [
   'profile',
@@ -29,6 +31,7 @@ const TAB_VALUES = [
   'deals',
   'appearance',
   'members',
+  'billing',
 ] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
@@ -64,6 +67,7 @@ export default function SettingsPage() {
       </div>
 
       <Tabs value={tab} onValueChange={(v) => onChange(v as TabValue)}>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:overflow-visible sm:px-0">
         <TabsList className="bg-slate-900 border border-slate-700">
           <TabsTrigger
             value="profile"
@@ -114,7 +118,15 @@ export default function SettingsPage() {
             <UsersRound className="size-4" />
             Members
           </TabsTrigger>
+          <TabsTrigger
+            value="billing"
+            className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
+          >
+            <CreditCard className="size-4" />
+            Billing
+          </TabsTrigger>
         </TabsList>
+        </div>
 
         <TabsContent value="profile" className="space-y-6">
           <ProfileForm />
@@ -144,6 +156,10 @@ export default function SettingsPage() {
 
         <TabsContent value="members">
           <MembersTab />
+        </TabsContent>
+
+        <TabsContent value="billing">
+          <BillingTab />
         </TabsContent>
       </Tabs>
     </div>

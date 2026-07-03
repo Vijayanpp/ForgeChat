@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { MessageSquare, CheckCircle, ArrowLeft } from "lucide-react";
+import { AuthLegalFooter } from "@/components/legal/auth-legal-footer";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -124,6 +125,7 @@ export default function ForgotPasswordPage() {
             <ArrowLeft className="h-4 w-4" />
             Back to sign in
           </Link>
+          <AuthLegalFooter />
         </CardContent>
       </Card>
     </div>

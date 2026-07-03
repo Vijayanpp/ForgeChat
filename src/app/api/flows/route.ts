@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { getFlowTemplate } from '@/lib/flows/templates'
+import {
+  assertAccountWritable,
+  assertWithinLimit,
+  getAccountBilling,
+  toBillingErrorResponse,
+} from '@/lib/billing/limits'
 
 /**
  * GET /api/flows — list the caller's flows.
@@ -65,6 +71,16 @@ export async function POST(request: Request) {
       { error: 'Your profile is not linked to an account.' },
       { status: 403 },
     )
+  }
+
+  try {
+    const billing = await getAccountBilling(supabase, accountId)
+    assertAccountWritable(billing.subscriptionStatus)
+    await assertWithinLimit(supabase, accountId, billing.planId, 'flows')
+  } catch (err) {
+    const billingResponse = toBillingErrorResponse(err)
+    if (billingResponse) return billingResponse
+    throw err
   }
 
   const body = (await request.json().catch(() => null)) as

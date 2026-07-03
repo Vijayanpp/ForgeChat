@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { CornerUpLeft, Copy, SmilePlus } from "lucide-react";
+import { CornerUpLeft, Copy, SmilePlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -19,6 +19,9 @@ interface MessageActionsProps {
   message: Message;
   onReply: () => void;
   onReact: (emoji: string) => void;
+  /** Admin+ only. Omit the prop entirely to hide the delete affordance
+   *  for callers without permission — see message-thread.tsx. */
+  onDelete?: () => void;
   children: ReactNode;
 }
 
@@ -31,6 +34,7 @@ export function MessageActions({
   message,
   onReply,
   onReact,
+  onDelete,
   children,
 }: MessageActionsProps) {
   // Touch devices have no hover. Long-press fires `contextmenu`; we capture
@@ -70,6 +74,11 @@ export function MessageActions({
 
   const handleReply = () => {
     onReply();
+    setTouchOpen(false);
+  };
+
+  const handleDelete = () => {
+    onDelete?.();
     setTouchOpen(false);
   };
 
@@ -141,6 +150,16 @@ export function MessageActions({
         >
           <Copy className="h-3.5 w-3.5" />
         </button>
+        {onDelete && (
+          <button
+            type="button"
+            onClick={handleDelete}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-slate-300 hover:bg-red-500/20 hover:text-red-400"
+            aria-label="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       </div>
     </div>

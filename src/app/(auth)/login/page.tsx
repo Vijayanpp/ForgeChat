@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { MessageSquare, UsersRound } from "lucide-react";
+import { AuthLegalFooter } from "@/components/legal/auth-legal-footer";
 
 // `useSearchParams` opts the component out of static prerendering
 // unless it sits under a Suspense boundary. We split the form into
@@ -35,6 +36,9 @@ function LoginPageInner() {
   // account. After a successful sign-in we send them to the join
   // page to accept rather than to /dashboard.
   const inviteToken = searchParams.get("invite");
+  // Set by dashboard-shell when a valid session's account no longer
+  // exists (post-cancellation retention purge deleted it).
+  const accountDeleted = searchParams.get("reason") === "account_deleted";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -87,6 +91,12 @@ function LoginPageInner() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {accountDeleted && (
+            <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+              That account&apos;s data has been permanently deleted per our
+              retention policy. Sign up again to start fresh.
+            </div>
+          )}
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
             {error && (
               <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
@@ -154,6 +164,7 @@ function LoginPageInner() {
               Create account
             </Link>
           </p>
+          <AuthLegalFooter />
         </CardContent>
       </Card>
     </div>

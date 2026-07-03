@@ -32,6 +32,12 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+import {
+  assertAccountWritable,
+  assertWithinLimit,
+  getAccountBilling,
+  toBillingErrorResponse,
+} from "@/lib/billing/limits";
 
 // Resolve the base URL we publish invite links under.
 //
@@ -178,6 +184,10 @@ export async function POST(request: Request) {
     );
     if (!limit.success) return rateLimitResponse(limit);
 
+    const billing = await getAccountBilling(ctx.supabase, ctx.accountId);
+    assertAccountWritable(billing.subscriptionStatus);
+    await assertWithinLimit(ctx.supabase, ctx.accountId, billing.planId, "seats");
+
     const body = (await request.json().catch(() => null)) as
       | { role?: unknown; expiresInDays?: unknown; label?: unknown }
       | null;
@@ -248,6 +258,6 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (err) {
-    return toErrorResponse(err);
+    return toBillingErrorResponse(err) ?? toErrorResponse(err);
   }
 }

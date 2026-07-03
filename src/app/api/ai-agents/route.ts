@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  assertAccountWritable,
+  assertWithinLimit,
+  getAccountBilling,
+  toBillingErrorResponse,
+} from "@/lib/billing/limits";
 
 async function resolveAccountId(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -47,6 +53,16 @@ export async function POST(request: Request) {
   const ctx = await resolveAccountId(supabase);
   if ("error" in ctx) {
     return NextResponse.json({ error: ctx.error }, { status: ctx.status });
+  }
+
+  try {
+    const billing = await getAccountBilling(supabase, ctx.accountId);
+    assertAccountWritable(billing.subscriptionStatus);
+    await assertWithinLimit(supabase, ctx.accountId, billing.planId, "aiAgents");
+  } catch (err) {
+    const billingResponse = toBillingErrorResponse(err);
+    if (billingResponse) return billingResponse;
+    throw err;
   }
 
   const body = await request.json().catch(() => null);

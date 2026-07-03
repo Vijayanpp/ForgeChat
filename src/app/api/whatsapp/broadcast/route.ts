@@ -15,6 +15,12 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import {
+  assertAccountWritable,
+  assertWithinLimit,
+  getAccountBilling,
+  toBillingErrorResponse,
+} from '@/lib/billing/limits'
 
 interface BroadcastResult {
   phone: string
@@ -95,6 +101,10 @@ export async function POST(request: Request) {
         { status: 403 },
       )
     }
+
+    const billing = await getAccountBilling(supabase, accountId)
+    assertAccountWritable(billing.subscriptionStatus)
+    await assertWithinLimit(supabase, accountId, billing.planId, 'broadcastsPerMonth')
 
     const body = await request.json()
     const {
@@ -254,6 +264,8 @@ export async function POST(request: Request) {
       results,
     })
   } catch (error) {
+    const billingResponse = toBillingErrorResponse(error)
+    if (billingResponse) return billingResponse
     console.error('Error in WhatsApp broadcast POST:', error)
     return NextResponse.json(
       { error: 'Failed to process broadcast' },

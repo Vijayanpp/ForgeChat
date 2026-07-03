@@ -24,9 +24,12 @@ import {
   Sparkles,
   Loader2,
   X,
+  MoreVertical,
+  AlertTriangle,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +37,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
@@ -62,6 +73,11 @@ interface MessageThreadProps {
   onMessagesLoaded: (messages: Message[]) => void;
   onNewMessage: (message: Message) => void;
   onUpdateMessage: (id: string, updates: Partial<Message>) => void;
+  /** Admin+ hard delete (DELETE /api/whatsapp/messages/[id]) already
+   *  succeeded server-side — remove it from the parent's lifted
+   *  `messages` state. Realtime's own DELETE handler is idempotent
+   *  against this (it's a no-op if the id is already gone). */
+  onDeleteMessage: (id: string) => void;
   onStatusChange: (conversationId: string, status: ConversationStatus) => void;
   onAssignChange: (
     conversationId: string,
@@ -141,13 +157,14 @@ export function MessageThread({
   onMessagesLoaded,
   onNewMessage,
   onUpdateMessage,
+  onDeleteMessage,
   onStatusChange,
   onAssignChange,
   onBack,
   resyncToken = 0,
   onRefresh,
 }: MessageThreadProps) {
-  const { user } = useAuth();
+  const { user, canManageMembers } = useAuth();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
@@ -176,6 +193,12 @@ export function MessageThread({
     }, 700);
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+
+  // Admin+ hard delete. CRM-only — WhatsApp's Cloud API has no
+  // recall/unsend endpoint, so this never touches the customer's copy
+  // of the message. Confirmed via a dialog since it's irreversible.
+  const [deletingMessage, setDeletingMessage] = useState<Message | null>(null);
+  const [isDeletingMessage, setIsDeletingMessage] = useState(false);
 
   // AI summary — cached by conversation.id so switching away and back
   // shows the summary instantly without refetching.
@@ -297,7 +320,7 @@ export function MessageThread({
 
       const { data, error } = await supabase
         .from("messages")
-        .select("*, ai_agent:ai_agents(name)")
+        .select("*")
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true });
 
@@ -648,6 +671,32 @@ export function MessageThread({
     [authorLabelFor],
   );
 
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deletingMessage) return;
+    setIsDeletingMessage(true);
+    try {
+      const res = await fetch(`/api/whatsapp/messages/${deletingMessage.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        toast.error(body?.error ?? "Failed to delete message");
+        return;
+      }
+      // Realtime DELETE will also remove it, but filter now so the
+      // bubble doesn't linger behind the dialog while that event is
+      // still in flight.
+      onDeleteMessage(deletingMessage.id);
+      setDeletingMessage(null);
+      toast.success("Message deleted");
+    } catch (err) {
+      console.error("[message-thread] delete message failed:", err);
+      toast.error("Could not reach the server");
+    } finally {
+      setIsDeletingMessage(false);
+    }
+  }, [deletingMessage, onDeleteMessage]);
+
   // Single reaction-set primitive. emoji === "" removes; otherwise adds/swaps.
   // The "toggle" semantic (pill click) is computed at the call site where the
   // current reactions for the bubble are already in scope — keeps this
@@ -802,14 +851,15 @@ export function MessageThread({
           </Badge>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* AI Summarize button */}
+        <div className="flex items-center gap-1 sm:gap-2">
+          {/* AI Summarize button — hidden on the narrowest phones (moved
+              into the "⋯" overflow menu below) so Status/Assign keep room. */}
           <button
             type="button"
             onClick={handleSummarize}
             disabled={loadingSummary}
             title="Summarize conversation with AI"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-primary disabled:opacity-60"
+            className="hidden h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-primary disabled:opacity-60 sm:inline-flex"
           >
             {loadingSummary ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -822,7 +872,8 @@ export function MessageThread({
               conversation list (the parent bumps its resyncToken). Useful
               when realtime missed an event or the agent just wants to be
               sure nothing's stale. Only rendered when the parent wires
-              up `onRefresh`. */}
+              up `onRefresh`. Hidden on the narrowest phones (see overflow
+              menu below). */}
           {onRefresh && (
             <button
               type="button"
@@ -831,7 +882,7 @@ export function MessageThread({
               aria-label="Refresh conversation"
               title="Refresh"
               className={cn(
-                "inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-60",
+                "hidden h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-60 sm:inline-flex",
               )}
             >
               <RefreshCw
@@ -839,6 +890,38 @@ export function MessageThread({
               />
             </button>
           )}
+
+          {/* "⋯" overflow menu — mobile only. Summarize/Refresh move here
+              below `sm` so they don't crowd the Status/Assign dropdowns
+              against the contact name on narrow phones. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label="More actions"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-white sm:hidden"
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="border-slate-700 bg-slate-800">
+              <DropdownMenuItem
+                onClick={handleSummarize}
+                disabled={loadingSummary}
+                className="text-sm text-slate-200"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Summarize with AI
+              </DropdownMenuItem>
+              {onRefresh && (
+                <DropdownMenuItem
+                  onClick={handleRefreshClick}
+                  disabled={isRefreshing}
+                  className="text-sm text-slate-200"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Refresh
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Status dropdown */}
           <DropdownMenu>
@@ -1000,6 +1083,9 @@ export function MessageThread({
                         onReact={(emoji) => {
                           if (emoji) void postReaction(msg.id, emoji);
                         }}
+                        onDelete={
+                          canManageMembers ? () => setDeletingMessage(msg) : undefined
+                        }
                       >
                         <MessageBubble
                           message={msg}
@@ -1033,6 +1119,51 @@ export function MessageThread({
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
       />
+
+      <Dialog
+        open={deletingMessage !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingMessage(null);
+        }}
+      >
+        <DialogContent className="bg-slate-900 border-slate-700 sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <AlertTriangle className="size-4 text-amber-400" />
+              Delete message
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              This permanently deletes the message from your CRM. It
+              can&apos;t be undone, and it won&apos;t remove the message
+              from WhatsApp — the customer will still have it on their
+              device.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="bg-slate-900 border-slate-700">
+            <Button
+              variant="outline"
+              onClick={() => setDeletingMessage(null)}
+              className="border-slate-700 text-slate-300 hover:bg-slate-800"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmDelete}
+              disabled={isDeletingMessage}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeletingMessage ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete message"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -7,6 +7,12 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate'
+import {
+  assertAccountWritable,
+  assertWithinLimit,
+  getAccountBilling,
+  toBillingErrorResponse,
+} from '@/lib/billing/limits'
 
 export async function GET() {
   const supabase = await createClient()
@@ -44,6 +50,16 @@ export async function POST(request: Request) {
       { error: 'Your profile is not linked to an account.' },
       { status: 403 },
     )
+  }
+
+  try {
+    const billing = await getAccountBilling(supabase, accountId)
+    assertAccountWritable(billing.subscriptionStatus)
+    await assertWithinLimit(supabase, accountId, billing.planId, 'automations')
+  } catch (err) {
+    const billingResponse = toBillingErrorResponse(err)
+    if (billingResponse) return billingResponse
+    throw err
   }
 
   const body = await request.json().catch(() => null)

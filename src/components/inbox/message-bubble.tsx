@@ -249,8 +249,6 @@ export function MessageBubble({
   onToggleReaction,
 }: MessageBubbleProps) {
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
-  const isBot = message.sender_type === "bot";
-  const agentLabel = message.ai_agent?.name;
   const time = format(new Date(message.created_at), "HH:mm");
 
   // Row alignment + width cap are owned by <MessageActions> so its hover
@@ -272,11 +270,6 @@ export function MessageBubble({
       >
         {reply && (
           <ReplyQuote authorLabel={reply.authorLabel} preview={reply.preview} />
-        )}
-        {isBot && agentLabel && (
-          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-white/70">
-            AI · {agentLabel}
-          </p>
         )}
         <MessageContent message={message} />
         <div

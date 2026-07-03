@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { MessageSquare, CheckCircle, UsersRound } from "lucide-react";
+import { AuthLegalFooter } from "@/components/legal/auth-legal-footer";
 
 // `useSearchParams` opts the component out of static prerendering
 // unless wrapped in Suspense — same pattern as /login.
@@ -39,6 +40,7 @@ function SignupPageInner() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -47,6 +49,11 @@ function SignupPageInner() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (!agreedToTerms) {
+      setError("You must agree to the Terms & Conditions and Privacy Policy");
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError("Passwords do not match");
@@ -215,9 +222,33 @@ function SignupPageInner() {
               />
             </div>
 
+            <label
+              htmlFor="agreeToTerms"
+              className="flex items-start gap-2 text-sm text-slate-400"
+            >
+              <input
+                id="agreeToTerms"
+                type="checkbox"
+                checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                className="mt-0.5 size-4 rounded border-slate-700 bg-slate-800 text-primary focus:ring-primary/20"
+              />
+              <span>
+                I agree to the{" "}
+                <Link href="/terms" className="text-primary hover:text-primary/80">
+                  Terms & Conditions
+                </Link>{" "}
+                and{" "}
+                <Link href="/privacy" className="text-primary hover:text-primary/80">
+                  Privacy Policy
+                </Link>
+                .
+              </span>
+            </label>
+
             <Button
               type="submit"
-              disabled={loading}
+              disabled={loading || !agreedToTerms}
               className="mt-2 h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {loading ? "Creating account..." : "Create account"}
@@ -237,6 +268,7 @@ function SignupPageInner() {
               Sign in
             </Link>
           </p>
+          <AuthLegalFooter />
         </CardContent>
       </Card>
     </div>

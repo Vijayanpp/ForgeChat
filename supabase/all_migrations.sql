@@ -3419,5 +3419,340 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_account_phone_normalized
   ON contacts (account_id, phone_normalized)
   WHERE phone_normalized <> '';
 
+-- ========================================
+-- Migration: 023_contact_lead_score.sql
+-- ========================================
+-- ============================================================
+-- 023_contact_lead_score
+--
+-- Persists AI-generated lead scores on contacts so the score
+-- survives page navigations without re-calling the LLM.
+--
+-- Adds:
+--   contacts.lead_score           INTEGER  (0–100, nullable)
+--   contacts.lead_score_updated_at TIMESTAMPTZ (nullable)
+--
+-- Nullability: both columns are nullable so existing rows are
+-- unaffected and the UI can distinguish "not yet scored" from
+-- a scored contact.
+-- ============================================================
 
+ALTER TABLE contacts
+  ADD COLUMN IF NOT EXISTS lead_score INTEGER
+    CHECK (lead_score IS NULL OR (lead_score >= 0 AND lead_score <= 100)),
+  ADD COLUMN IF NOT EXISTS lead_score_updated_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN contacts.lead_score IS
+  'AI-generated lead quality score 0–100. NULL = not yet scored.';
+
+COMMENT ON COLUMN contacts.lead_score_updated_at IS
+  'Timestamp of the last AI lead score calculation.';
+
+-- ========================================
+-- Migration: 024_ai_agents.sql
+-- ========================================
+-- ============================================================
+-- AI Agents — per-account persona profiles for automation AI replies.
+-- Idempotent — safe to run multiple times.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS ai_agents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  system_prompt TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT 'gpt-4o',
+  temperature NUMERIC(3, 2) NOT NULL DEFAULT 0.80
+    CHECK (temperature >= 0 AND temperature <= 2),
+  context_message_limit INTEGER NOT NULL DEFAULT 15
+    CHECK (context_message_limit >= 1 AND context_message_limit <= 50),
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('active', 'draft')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_agents_account
+  ON ai_agents(account_id, created_at DESC);
+
+ALTER TABLE ai_agents ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS ai_agents_select ON ai_agents;
+CREATE POLICY ai_agents_select ON ai_agents FOR SELECT
+  USING (is_account_member(account_id));
+
+DROP POLICY IF EXISTS ai_agents_insert ON ai_agents;
+CREATE POLICY ai_agents_insert ON ai_agents FOR INSERT
+  WITH CHECK (is_account_member(account_id, 'admin'));
+
+DROP POLICY IF EXISTS ai_agents_update ON ai_agents;
+CREATE POLICY ai_agents_update ON ai_agents FOR UPDATE
+  USING (is_account_member(account_id, 'admin'));
+
+DROP POLICY IF EXISTS ai_agents_delete ON ai_agents;
+CREATE POLICY ai_agents_delete ON ai_agents FOR DELETE
+  USING (is_account_member(account_id, 'admin'));
+
+DROP TRIGGER IF EXISTS set_updated_at ON ai_agents;
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON ai_agents
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+ALTER TABLE messages
+  ADD COLUMN IF NOT EXISTS ai_agent_id UUID REFERENCES ai_agents(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_messages_ai_agent
+  ON messages(ai_agent_id) WHERE ai_agent_id IS NOT NULL;
+
+-- ========================================
+-- Migration: 025_subscriptions.sql
+-- ========================================
+-- ============================================================
+-- 025_subscriptions
+--
+-- Adds SaaS subscription/billing state to `accounts` and an audit
+-- log of inbound Razorpay webhook events. See src/lib/billing/plans.ts
+-- for the plan catalogue (tiers, INR pricing, usage limits) that these
+-- columns reference by id.
+--
+-- Backfill strategy for EXISTING accounts (pre-migration installs):
+--   `plan_id` defaults to 'business' and `subscription_status' to
+--   'active' — i.e. existing accounts are grandfathered onto the
+--   top tier with no trial clock, so self-hosted / already-running
+--   deployments are never locked out by this migration. Only
+--   NEW signups (via the updated handle_new_user() trigger below)
+--   get 'trial' / 'trialing' with a 14-day trial_ends_at.
+--
+-- Idempotent — safe to run multiple times.
+-- ============================================================
+
+-- ============================================================
+-- ACCOUNTS — subscription columns
+-- ============================================================
+ALTER TABLE accounts
+  ADD COLUMN IF NOT EXISTS plan_id TEXT NOT NULL DEFAULT 'business',
+  ADD COLUMN IF NOT EXISTS subscription_status TEXT NOT NULL DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS current_period_start TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS razorpay_customer_id TEXT,
+  ADD COLUMN IF NOT EXISTS razorpay_subscription_id TEXT,
+  -- Defaults to the owner's email at signup; editable independently
+  -- so billing notices can go to a shared inbox instead of a person.
+  ADD COLUMN IF NOT EXISTS billing_email TEXT;
+
+ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_plan_id_check;
+ALTER TABLE accounts ADD CONSTRAINT accounts_plan_id_check
+  CHECK (plan_id IN ('trial', 'starter', 'growth', 'pro', 'business'));
+
+ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_subscription_status_check;
+ALTER TABLE accounts ADD CONSTRAINT accounts_subscription_status_check
+  CHECK (subscription_status IN ('trialing', 'active', 'past_due', 'canceled', 'expired'));
+
+-- Webhook handler looks accounts up by Razorpay subscription id.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_razorpay_subscription
+  ON accounts(razorpay_subscription_id)
+  WHERE razorpay_subscription_id IS NOT NULL;
+-- NOTE: accounts_plan_id_check below is superseded by 026_simplify_plans
+-- further down this file, which narrows it to ('trial', 'pro').
+
+-- ============================================================
+-- BILLING_EVENTS — webhook audit log + idempotency
+--
+-- Every verified Razorpay webhook delivery is recorded here keyed by
+-- its own event id, so a redelivered webhook (Razorpay retries on
+-- non-2xx) is a no-op rather than double-applying a state change.
+-- Service-role only — this is an internal audit trail, never read
+-- from the browser.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS billing_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+  razorpay_event_id TEXT NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_events_account
+  ON billing_events(account_id, created_at DESC);
+
+ALTER TABLE billing_events ENABLE ROW LEVEL SECURITY;
+-- No client policies — service role (webhook route) is the only writer
+-- and reader. RLS with zero policies denies all client access by default.
+
+-- ============================================================
+-- SIGNUP TRIGGER — new accounts start on a 14-day trial
+--
+-- Replaces the 017_account_sharing.sql version to additionally seed
+-- plan_id='trial', subscription_status='trialing', and trial_ends_at.
+-- Explicit INSERT values here override the grandfathering column
+-- defaults above, so this only affects rows created from this point
+-- forward.
+-- ============================================================
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user();
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_full_name TEXT;
+  v_account_id UUID;
+BEGIN
+  v_full_name := COALESCE(NEW.raw_user_meta_data->>'full_name', '');
+
+  INSERT INTO public.accounts (
+    name, owner_user_id, plan_id, subscription_status, trial_ends_at, billing_email
+  )
+  VALUES (
+    COALESCE(NULLIF(v_full_name, ''), NEW.email, 'My account'),
+    NEW.id,
+    'trial',
+    'trialing',
+    NOW() + INTERVAL '14 days',
+    NEW.email
+  )
+  RETURNING id INTO v_account_id;
+
+  INSERT INTO public.profiles (user_id, full_name, email, account_id, account_role)
+  VALUES (NEW.id, v_full_name, NEW.email, v_account_id, 'owner');
+
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING 'Failed to bootstrap account/profile for user %: %', NEW.id, SQLERRM;
+  RETURN NEW;
+END;
+$$;
+
+ALTER FUNCTION public.handle_new_user() OWNER TO postgres;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ========================================
+-- Migration: 026_simplify_plans.sql
+-- ========================================
+-- ============================================================
+-- 026_simplify_plans
+--
+-- Collapses the plan catalogue from 4 purchasable tiers
+-- (starter/growth/pro/business) down to a single "pro" plan with
+-- unlimited usage, billed monthly or yearly. See
+-- src/lib/billing/plans.ts for the (now much smaller) catalogue.
+--
+-- Any account previously on starter/growth/business is migrated to
+-- 'pro' — those tiers no longer exist, and 'pro' already carries
+-- unlimited limits so no account loses functionality. 'trial' is
+-- untouched.
+--
+-- Idempotent — safe to run multiple times.
+-- ============================================================
+
+UPDATE accounts
+  SET plan_id = 'pro'
+  WHERE plan_id IN ('starter', 'growth', 'business');
+
+ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_plan_id_check;
+ALTER TABLE accounts ADD CONSTRAINT accounts_plan_id_check
+  CHECK (plan_id IN ('trial', 'pro'));
+
+-- ========================================
+-- Migration: 027_data_retention.sql
+-- ========================================
+-- ============================================================
+-- 027_data_retention
+--
+-- Backs the Privacy Policy promise (see
+-- src/components/legal/privacy-content.tsx, "Data retention and
+-- deletion"): 30 days after a subscription is canceled, the
+-- account's data is permanently deleted from active systems.
+--
+-- `account_deletions` is a standalone audit table (no FK back to
+-- `accounts` — the whole point is that the account row is gone by
+-- the time this is read) recording *that* a purge happened, for
+-- support/compliance purposes, without retaining any of the actual
+-- CRM data (contacts, messages, etc.) that got deleted.
+--
+-- The actual purge is a single `DELETE FROM accounts WHERE id = ...`
+-- run from a service-role context (see src/lib/billing/retention.ts)
+-- — every account-scoped table already has `account_id ... ON DELETE
+-- CASCADE`, and `billing_events.account_id` is `ON DELETE SET NULL`,
+-- so the billing/audit trail survives independent of the account.
+--
+-- Idempotent — safe to run multiple times.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS account_deletions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  -- Snapshot of the account at deletion time — not a live FK, since
+  -- the referenced account no longer exists once this row is written.
+  account_id UUID NOT NULL,
+  account_name TEXT NOT NULL,
+  owner_user_id UUID NOT NULL,
+  billing_email TEXT,
+  plan_id TEXT NOT NULL,
+  subscription_status TEXT NOT NULL,
+  -- The subscription_status = 'canceled' reference timestamp the
+  -- 30-day grace period was measured from (current_period_end, or
+  -- accounts.updated_at when that was never set).
+  retention_reference_at TIMESTAMPTZ NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'post_cancellation_retention',
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_deletions_deleted_at
+  ON account_deletions(deleted_at DESC);
+
+ALTER TABLE account_deletions ENABLE ROW LEVEL SECURITY;
+-- No client policies — service role (the retention-purge route) is
+-- the only writer and reader. RLS with zero policies denies all
+-- client access by default.
+
+-- ========================================
+-- Migration: 028_message_delete.sql
+-- ========================================
+-- ============================================================
+-- 028_message_delete
+--
+-- Splits the `messages_modify` FOR ALL policy (017_account_sharing.sql)
+-- into per-command policies so DELETE can require a higher role than
+-- INSERT/UPDATE:
+--
+--   - messages_insert / messages_update: agent+ (unchanged behavior —
+--     needed by POST /api/whatsapp/send, which writes through the
+--     caller's own RLS-scoped Supabase client).
+--   - messages_delete: admin+ only. Backs the "Delete message" action
+--     in the inbox (DELETE /api/whatsapp/messages/[id]) — a hard,
+--     irreversible delete since WhatsApp's Cloud API has no
+--     recall/unsend endpoint to mirror. Previously any agent could
+--     delete a message directly via their own Supabase session; this
+--     closes that gap so the app-layer requireRole("admin") check in
+--     the API route is backed by the same rule at the DB layer.
+--
+-- Idempotent — safe to run multiple times.
+-- ============================================================
+
+DROP POLICY IF EXISTS messages_modify ON messages;
+DROP POLICY IF EXISTS messages_insert ON messages;
+DROP POLICY IF EXISTS messages_update ON messages;
+DROP POLICY IF EXISTS messages_delete ON messages;
+
+CREATE POLICY messages_insert ON messages FOR INSERT WITH CHECK (
+  EXISTS (SELECT 1 FROM conversations c WHERE c.id = messages.conversation_id AND is_account_member(c.account_id, 'agent'))
+);
+
+CREATE POLICY messages_update ON messages FOR UPDATE USING (
+  EXISTS (SELECT 1 FROM conversations c WHERE c.id = messages.conversation_id AND is_account_member(c.account_id, 'agent'))
+) WITH CHECK (
+  EXISTS (SELECT 1 FROM conversations c WHERE c.id = messages.conversation_id AND is_account_member(c.account_id, 'agent'))
+);
+
+CREATE POLICY messages_delete ON messages FOR DELETE USING (
+  EXISTS (SELECT 1 FROM conversations c WHERE c.id = messages.conversation_id AND is_account_member(c.account_id, 'admin'))
+);
 

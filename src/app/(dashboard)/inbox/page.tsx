@@ -264,6 +264,16 @@ export default function InboxPage() {
           prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
         );
       }
+
+      if (event.eventType === "DELETE") {
+        // Admin-only hard delete (DELETE /api/whatsapp/messages/[id]).
+        // Default replica identity only gives us the primary key in
+        // `old`, which is all we need to drop it from the active
+        // thread. The conversation list preview is repaired by the
+        // API route's own `conversations` UPDATE, handled separately
+        // by handleConversationEvent.
+        setMessages((prev) => prev.filter((m) => m.id !== event.old.id));
+      }
     },
     [activeConversation, hydrateConversation]
   );
@@ -515,6 +525,10 @@ export default function InboxPage() {
     []
   );
 
+  const handleDeleteMessage = useCallback((id: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== id));
+  }, []);
+
   const handleStatusChange = useCallback(
     (conversationId: string, status: ConversationStatus) => {
       setConversations((prev) =>
@@ -555,12 +569,12 @@ export default function InboxPage() {
   const hasActiveConv = !!activeConversation;
 
   return (
-    <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
+    <div className="-m-4 flex h-full flex-col overflow-hidden sm:-m-6">
       {/* WhatsApp connection banner — in the flex column, not absolute,
           so it pushes the panels down instead of overlapping them. */}
       {whatsappConnected === false && (
-        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
-          <WifiOff className="h-4 w-4 text-amber-400" />
+        <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center">
+          <WifiOff className="h-4 w-4 shrink-0 text-amber-400" />
           <p className="text-xs text-amber-400">
             WhatsApp® is not connected. Go to Settings to connect your account.
           </p>
@@ -573,9 +587,9 @@ export default function InboxPage() {
       {notifSupported &&
         notifPermission === "default" &&
         !notifBannerDismissed && (
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-primary/20 bg-primary/10 px-4 py-2">
-            <div className="flex items-center gap-2">
-              <Bell className="h-4 w-4 text-primary" />
+          <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 border-b border-primary/20 bg-primary/10 px-4 py-2 sm:justify-between">
+            <div className="flex min-w-0 items-center gap-2">
+              <Bell className="h-4 w-4 shrink-0 text-primary" />
               <p className="text-xs text-primary/90">
                 Enable browser notifications to get alerts when new messages arrive while you&apos;re in another tab.
               </p>
@@ -598,7 +612,7 @@ export default function InboxPage() {
           </div>
         )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
             thread can occupy the full width. Always visible on lg+. */}
@@ -640,6 +654,7 @@ export default function InboxPage() {
             onMessagesLoaded={handleMessagesLoaded}
             onNewMessage={handleNewMessage}
             onUpdateMessage={handleUpdateMessage}
+            onDeleteMessage={handleDeleteMessage}
             onStatusChange={handleStatusChange}
             onAssignChange={handleAssignChange}
             onBack={handleCloseConversation}

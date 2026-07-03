@@ -19,6 +19,7 @@ import {
   isAccountRole,
   type AccountRole,
 } from "@/lib/auth/roles";
+import { isPlanId, type PlanId, type SubscriptionStatus } from "@/lib/billing/plans";
 
 interface Profile {
   id: string;
@@ -42,6 +43,10 @@ interface AccountSummary {
   /** Default deal currency (ISO-4217). NOT NULL DEFAULT 'USD' in the
    *  DB (migration 021); narrowed to DEFAULT_CURRENCY when absent. */
   default_currency: string;
+  /** Subscription tier + status (migration 025). */
+  plan_id: PlanId;
+  subscription_status: SubscriptionStatus;
+  trial_ends_at: string | null;
 }
 
 interface AuthContextValue {
@@ -136,7 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // missing account collapses to null rather than a half-
           // populated row (shouldn't happen post-017 NOT NULL, but
           // belt-and-braces against forks running older schemas).
-          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, account:accounts!inner(id, name, default_currency)",
+          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, account:accounts!inner(id, name, default_currency, plan_id, subscription_status, trial_ends_at)",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -162,15 +167,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               id: string;
               name: string;
               default_currency: string | null;
+              plan_id: string | null;
+              subscription_status: string | null;
+              trial_ends_at: string | null;
             } | null);
         // Narrow default_currency defensively: forks running pre-021
         // schemas won't have the column, so a missing/null value reads
         // as the safe USD fallback rather than crashing the picker.
+        // Same defensive fallback for the migration-025 billing columns
+        // — forks on an older schema read as an unrestricted 'pro'/
+        // 'active' account rather than crashing the billing tab.
         const accountRow: AccountSummary | null = accountRaw
           ? {
               id: accountRaw.id,
               name: accountRaw.name,
               default_currency: accountRaw.default_currency ?? DEFAULT_CURRENCY,
+              plan_id: isPlanId(accountRaw.plan_id) ? accountRaw.plan_id : "pro",
+              subscription_status:
+                (accountRaw.subscription_status as SubscriptionStatus | null) ?? "active",
+              trial_ends_at: accountRaw.trial_ends_at ?? null,
             }
           : null;
 

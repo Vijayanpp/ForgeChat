@@ -151,7 +151,7 @@ export default function TeamPage() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Team</h1>
           <p className="mt-1 text-sm text-slate-400">
@@ -159,7 +159,7 @@ export default function TeamPage() {
           </p>
         </div>
         {!loading && (
-          <div className="flex items-center gap-3 text-sm text-slate-500">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
             <span>
               <span className="font-medium text-white">{members.length}</span>{" "}
               member{members.length !== 1 ? "s" : ""}
