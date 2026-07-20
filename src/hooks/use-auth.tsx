@@ -51,6 +51,8 @@ interface AccountSummary {
   affiliate_link_enabled: boolean;
   affiliate_link_label: string | null;
   affiliate_link_url: string | null;
+  /** Front Desk module toggle (migration 029). */
+  front_desk_enabled: boolean;
 }
 
 interface AuthContextValue {
@@ -145,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // missing account collapses to null rather than a half-
           // populated row (shouldn't happen post-017 NOT NULL, but
           // belt-and-braces against forks running older schemas).
-          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, account:accounts!inner(id, name, default_currency, plan_id, subscription_status, trial_ends_at, affiliate_link_enabled, affiliate_link_label, affiliate_link_url)",
+          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, account:accounts!inner(id, name, default_currency, plan_id, subscription_status, trial_ends_at, affiliate_link_enabled, affiliate_link_label, affiliate_link_url, front_desk_enabled)",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -177,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               affiliate_link_enabled: boolean | null;
               affiliate_link_label: string | null;
               affiliate_link_url: string | null;
+              front_desk_enabled: boolean | null;
             } | null);
         // Narrow default_currency defensively: forks running pre-021
         // schemas won't have the column, so a missing/null value reads
@@ -196,6 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               affiliate_link_enabled: accountRaw.affiliate_link_enabled ?? false,
               affiliate_link_label: accountRaw.affiliate_link_label ?? null,
               affiliate_link_url: accountRaw.affiliate_link_url ?? null,
+              front_desk_enabled: accountRaw.front_desk_enabled ?? false,
             }
           : null;
 

@@ -64,7 +64,67 @@ export interface Account {
   affiliate_link_enabled?: boolean;
   affiliate_link_label?: string | null;
   affiliate_link_url?: string | null;
+  /** Front Desk module toggle (migration 029). */
+  front_desk_enabled?: boolean;
 }
+
+// ============================================================
+// Front Desk entities (029_front_desk.sql)
+// ============================================================
+
+export type FrontDeskHistoryScope = "today_only" | "full_history";
+
+export type FrontDeskPaymentMode =
+  | "cash"
+  | "upi"
+  | "card"
+  | "bank_transfer"
+  | "other";
+
+export interface FrontDeskProperty {
+  id: string;
+  account_id: string;
+  name: string;
+  address: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FrontDeskGuestEntry {
+  id: string;
+  account_id?: string;
+  property_id: string;
+  contact_id: string | null;
+  entered_by: string | null;
+  guest_name: string;
+  phone: string | null;
+  id_proof_type: string | null;
+  id_proof_number: string | null;
+  number_of_guests: number;
+  room_number: string | null;
+  amount_paid: number;
+  currency: string;
+  payment_mode: FrontDeskPaymentMode;
+  check_in_at: string;
+  expected_check_out_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Resolved permission context for Front Desk API routes and UI. */
+export interface FrontDeskContext {
+  isAdmin: boolean;
+  historyScope: FrontDeskHistoryScope;
+  canViewGuestDetails: boolean;
+  canViewCashTotal: boolean;
+  canExport: boolean;
+  canManageEntries: boolean;
+  /** null = all properties; [] = none. */
+  propertyIds: string[] | null;
+}
+
 
 /**
  * Hydrated member row for the Settings → Members tab. Combines
