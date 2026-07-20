@@ -9,7 +9,6 @@ import {
   Palette,
   UsersRound,
   Coins,
-  CreditCard,
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
@@ -21,8 +20,6 @@ import { SessionsCard } from '@/components/settings/sessions-card';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { MembersTab } from '@/components/settings/members-tab';
 import { DealsSettings } from '@/components/settings/deals-settings';
-import { BillingTab } from '@/components/settings/billing-tab';
-
 const TAB_VALUES = [
   'profile',
   'whatsapp',
@@ -31,7 +28,6 @@ const TAB_VALUES = [
   'deals',
   'appearance',
   'members',
-  'billing',
 ] as const;
 type TabValue = (typeof TAB_VALUES)[number];
 
@@ -118,13 +114,6 @@ export default function SettingsPage() {
             <UsersRound className="size-4" />
             Members
           </TabsTrigger>
-          <TabsTrigger
-            value="billing"
-            className="data-active:bg-slate-800 data-active:text-primary text-slate-400"
-          >
-            <CreditCard className="size-4" />
-            Billing
-          </TabsTrigger>
         </TabsList>
         </div>
 
@@ -158,9 +147,7 @@ export default function SettingsPage() {
           <MembersTab />
         </TabsContent>
 
-        <TabsContent value="billing">
-          <BillingTab />
-        </TabsContent>
+
       </Tabs>
     </div>
   );

@@ -60,6 +60,10 @@ export interface Account {
   razorpay_customer_id?: string | null;
   razorpay_subscription_id?: string | null;
   billing_email?: string | null;
+  /** Inbox affiliate link (migration 031). */
+  affiliate_link_enabled?: boolean;
+  affiliate_link_label?: string | null;
+  affiliate_link_url?: string | null;
 }
 
 /**

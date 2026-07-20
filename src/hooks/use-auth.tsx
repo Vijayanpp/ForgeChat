@@ -47,6 +47,10 @@ interface AccountSummary {
   plan_id: PlanId;
   subscription_status: SubscriptionStatus;
   trial_ends_at: string | null;
+  /** Inbox affiliate link (migration 031). */
+  affiliate_link_enabled: boolean;
+  affiliate_link_label: string | null;
+  affiliate_link_url: string | null;
 }
 
 interface AuthContextValue {
@@ -141,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // missing account collapses to null rather than a half-
           // populated row (shouldn't happen post-017 NOT NULL, but
           // belt-and-braces against forks running older schemas).
-          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, account:accounts!inner(id, name, default_currency, plan_id, subscription_status, trial_ends_at)",
+          "id, full_name, email, avatar_url, role, beta_features, account_id, account_role, account:accounts!inner(id, name, default_currency, plan_id, subscription_status, trial_ends_at, affiliate_link_enabled, affiliate_link_label, affiliate_link_url)",
         )
         .eq("user_id", userId)
         .maybeSingle();
@@ -170,6 +174,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               plan_id: string | null;
               subscription_status: string | null;
               trial_ends_at: string | null;
+              affiliate_link_enabled: boolean | null;
+              affiliate_link_label: string | null;
+              affiliate_link_url: string | null;
             } | null);
         // Narrow default_currency defensively: forks running pre-021
         // schemas won't have the column, so a missing/null value reads
@@ -186,6 +193,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               subscription_status:
                 (accountRaw.subscription_status as SubscriptionStatus | null) ?? "active",
               trial_ends_at: accountRaw.trial_ends_at ?? null,
+              affiliate_link_enabled: accountRaw.affiliate_link_enabled ?? false,
+              affiliate_link_label: accountRaw.affiliate_link_label ?? null,
+              affiliate_link_url: accountRaw.affiliate_link_url ?? null,
             }
           : null;
 

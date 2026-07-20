@@ -22,9 +22,6 @@ export default function LegalLayout({ children }: { children: ReactNode }) {
             <BrandLogo variant="compact" />
           </Link>
           <nav className="flex items-center gap-4 text-sm text-slate-400">
-            <Link href="/pricing" className="hover:text-white">
-              Pricing
-            </Link>
             <Link href="/privacy" className="hover:text-white">
               Privacy
             </Link>

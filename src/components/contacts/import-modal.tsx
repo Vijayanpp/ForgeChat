@@ -8,6 +8,7 @@ import {
   isUniqueViolation,
   normalizeKey,
 } from '@/lib/contacts/dedupe';
+import { parseContactCsv, type ParsedContactCsvRow } from '@/lib/contacts/parse-csv';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -26,62 +27,7 @@ interface ImportModalProps {
   onImported: () => void;
 }
 
-interface ParsedRow {
-  phone: string;
-  name?: string;
-  email?: string;
-  company?: string;
-}
-
-function parseCSV(text: string): ParsedRow[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-
-  const headerLine = lines[0];
-  const headers = headerLine.split(',').map((h) => h.trim().toLowerCase().replace(/["']/g, ''));
-
-  const phoneIdx = headers.indexOf('phone');
-  if (phoneIdx === -1) return [];
-
-  const nameIdx = headers.indexOf('name');
-  const emailIdx = headers.indexOf('email');
-  const companyIdx = headers.indexOf('company');
-
-  const rows: ParsedRow[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    // Simple CSV parse (handles quoted fields)
-    const values: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (const char of line) {
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        values.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    values.push(current.trim());
-
-    const phone = values[phoneIdx]?.replace(/["']/g, '').trim();
-    if (!phone) continue;
-
-    rows.push({
-      phone,
-      name: nameIdx >= 0 ? values[nameIdx]?.replace(/["']/g, '').trim() || undefined : undefined,
-      email: emailIdx >= 0 ? values[emailIdx]?.replace(/["']/g, '').trim() || undefined : undefined,
-      company:
-        companyIdx >= 0 ? values[companyIdx]?.replace(/["']/g, '').trim() || undefined : undefined,
-    });
-  }
-
-  return rows;
-}
+type ParsedRow = ParsedContactCsvRow;
 
 export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps) {
   const supabase = createClient();
@@ -117,7 +63,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
     setResult(null);
 
     const text = await selected.text();
-    const rows = parseCSV(text);
+    const rows = parseContactCsv(text);
 
     if (rows.length === 0) {
       toast.error('No valid rows found. Ensure CSV has a "phone" column header.');

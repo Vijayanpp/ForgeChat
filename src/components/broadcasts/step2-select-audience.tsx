@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { parseContactCsv } from '@/lib/contacts/parse-csv';
+import { dedupeByPhone } from '@/lib/contacts/dedupe';
 import { CustomField, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import {
   Users,
   Tags,
@@ -13,6 +16,7 @@ import {
   ArrowRight,
   ArrowLeft,
   X,
+  FileText,
 } from 'lucide-react';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv';
@@ -89,6 +93,8 @@ export function Step2SelectAudience({
   const [loadingFields, setLoadingFields] = useState(false);
   const [estimatedCount, setEstimatedCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   // Tags are used both by the primary "Filter by Tags" audience type
   // AND by the exclude-list below — so always load once on mount.
@@ -236,6 +242,48 @@ export function Step2SelectAudience({
     onUpdate({ ...audience, customField: { ...prev, ...patch } });
   }
 
+  async function handleCsvFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+
+    setCsvFileName(selected.name);
+
+    try {
+      const text = await selected.text();
+      const parsed = parseContactCsv(text);
+
+      if (parsed.length === 0) {
+        toast.error('No valid rows found. Ensure the CSV has a "phone" column header.');
+        onUpdate({ ...audience, csvContacts: undefined });
+        return;
+      }
+
+      const { unique, duplicates } = dedupeByPhone(parsed);
+      if (duplicates > 0) {
+        toast.info(`${duplicates} duplicate phone number${duplicates === 1 ? '' : 's'} removed`);
+      }
+
+      onUpdate({
+        ...audience,
+        csvContacts: unique.map((row) => ({
+          phone: row.phone,
+          name: row.name,
+        })),
+      });
+    } catch {
+      toast.error('Could not read the CSV file');
+      onUpdate({ ...audience, csvContacts: undefined });
+    }
+  }
+
+  function clearCsvUpload() {
+    setCsvFileName(null);
+    onUpdate({ ...audience, csvContacts: undefined });
+    if (csvInputRef.current) csvInputRef.current.value = '';
+  }
+
+  const csvPreview = audience.csvContacts?.slice(0, 5) ?? [];
+
   const isValid =
     audience.type === 'all' ||
     (audience.type === 'tags' && audience.tagIds && audience.tagIds.length > 0) ||
@@ -262,7 +310,12 @@ export function Step2SelectAudience({
           return (
             <button
               key={option.type}
-              onClick={() =>
+              type="button"
+              onClick={() => {
+                if (option.type !== 'csv') {
+                  setCsvFileName(null);
+                  if (csvInputRef.current) csvInputRef.current.value = '';
+                }
                 onUpdate({
                   ...audience,
                   type: option.type,
@@ -275,8 +328,8 @@ export function Step2SelectAudience({
                       : undefined,
                   csvContacts:
                     option.type === 'csv' ? audience.csvContacts : undefined,
-                })
-              }
+                });
+              }}
               className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-all ${
                 isSelected
                   ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
@@ -384,6 +437,94 @@ export function Step2SelectAudience({
                 placeholder="Value"
                 className="h-9 rounded-lg border border-slate-700 bg-slate-800 px-2.5 text-sm text-white outline-none placeholder:text-slate-500 focus:border-primary focus:ring-1 focus:ring-primary"
               />
+            </div>
+          )}
+        </div>
+      )}
+
+      {audience.type === 'csv' && (
+        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <p className="text-sm font-medium text-white">Upload recipient list</p>
+          <p className="text-xs text-slate-400">
+            CSV must include a <span className="text-slate-300">phone</span> column.
+            Optional: <span className="text-slate-300">name</span>.
+          </p>
+
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => csvInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                csvInputRef.current?.click();
+              }
+            }}
+            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-700 p-6 transition-colors hover:border-primary/50"
+          >
+            {csvFileName || audience.csvContacts?.length ? (
+              <>
+                <FileText className="h-8 w-8 text-primary" />
+                <p className="text-sm text-slate-300">
+                  {csvFileName ?? 'Recipients loaded'}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {audience.csvContacts?.length ?? 0} recipient
+                  {(audience.csvContacts?.length ?? 0) === 1 ? '' : 's'} ready
+                </p>
+              </>
+            ) : (
+              <>
+                <Upload className="h-8 w-8 text-slate-500" />
+                <p className="text-sm text-slate-400">Click to upload CSV file</p>
+                <p className="text-xs text-slate-500">phone column required</p>
+              </>
+            )}
+          </div>
+
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleCsvFileChange}
+            className="hidden"
+          />
+
+          {(csvFileName || (audience.csvContacts?.length ?? 0) > 0) && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={clearCsvUpload}
+                className="text-xs text-slate-400 hover:text-red-300"
+              >
+                Remove file
+              </button>
+            </div>
+          )}
+
+          {csvPreview.length > 0 && (
+            <div className="overflow-hidden rounded-lg border border-slate-700">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-slate-800">
+                    <th className="px-3 py-1.5 text-left font-medium text-slate-400">Phone</th>
+                    <th className="px-3 py-1.5 text-left font-medium text-slate-400">Name</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvPreview.map((row, i) => (
+                    <tr key={i} className="border-t border-slate-700/50">
+                      <td className="px-3 py-1.5 text-slate-300">{row.phone}</td>
+                      <td className="px-3 py-1.5 text-slate-300">{row.name || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {(audience.csvContacts?.length ?? 0) > 5 && (
+                <p className="border-t border-slate-700/50 px-3 py-2 text-xs text-slate-500">
+                  …and {(audience.csvContacts?.length ?? 0) - 5} more rows
+                </p>
+              )}
             </div>
           )}
         </div>
