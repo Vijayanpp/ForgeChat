@@ -238,6 +238,28 @@ Rules for your reply:
 - Do not use markdown headers or numbered lists unless very short
 - When the customer sent a photo, look at it carefully and reference specific details you can see before interpreting
 - Output ONLY the message text to send, nothing else`;
+/** Injected into every AI agent call so the model knows "today" (avoids 2023/cutoff answers). */
+export function buildCurrentDateContext(
+  timeZone = process.env.AI_AGENT_TIMEZONE ?? "Asia/Kolkata",
+): string {
+  const now = new Date();
+  const formatted = new Intl.DateTimeFormat("en-IN", {
+    timeZone,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(now);
+  const year = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+  }).format(now);
+  return `\n\n[Current date and time: ${formatted}. The current year is ${year}. When the customer asks about today, now, or the current year, use these values — never say 2023 or cite an old knowledge cutoff.]`;
+}
+
 
 function toOpenAiMessage(m: ChatMessage): ChatCompletionMessageParam {
   if (m.role === "assistant" || !m.imageDataUrls?.length) {
@@ -287,7 +309,12 @@ export async function generateAgentReply(
     messages: [
       {
         role: "system",
-        content: agent.system_prompt + contextNote + visionNote + WHATSAPP_REPLY_RULES,
+        content:
+          agent.system_prompt +
+          buildCurrentDateContext() +
+          contextNote +
+          visionNote +
+          WHATSAPP_REPLY_RULES,
       },
       ...messages.map(toOpenAiMessage),
     ],
