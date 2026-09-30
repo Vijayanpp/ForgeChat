@@ -6,7 +6,14 @@ import { customer, emptySession, fakeLlm, systemText, testAgent, testRuntime, te
 import type { ChatTurn, SessionState } from "../types";
 import { parseAgentConfig } from "./catalog";
 import type { ReportRequest, SpecialistServices } from "./contract";
-import { palmReadingSpecialist, payeeAliases, planPalmTurn, offerScript, withPaymentOffer } from "./palm-reading";
+import {
+  initialFreeTurns,
+  palmReadingSpecialist,
+  payeeAliases,
+  planPalmTurn,
+  offerScript,
+  withPaymentOffer,
+} from "./palm-reading";
 import { attachPaymentOffer } from "./palm-offer";
 
 describe("planPalmTurn", () => {
@@ -26,6 +33,28 @@ describe("planPalmTurn", () => {
       offerNow: true,
     });
     expect(planPalmTurn({ hasNewPhoto: false, readingsGiven: 3, offerMade: true, upsellAfterReadings: 1 }).offerNow).toBe(false);
+  });
+});
+
+describe("initialFreeTurns", () => {
+  it("uses stored free_turns when present", () => {
+    expect(
+      initialFreeTurns({
+        slots: { free_turns: 2, readings_given: 1 },
+        readingsGiven: 1,
+        transcript: [customer("q1"), customer("q2"), customer("q3")],
+      }),
+    ).toBe(2);
+  });
+
+  it("backfills older chats from photos or prior questions, not only photos", () => {
+    expect(
+      initialFreeTurns({
+        slots: { readings_given: 1 },
+        readingsGiven: 1,
+        transcript: [customer("hi"), customer("and my career?"), customer("marriage?"), customer("health?")],
+      }),
+    ).toBe(3);
   });
 });
 
@@ -184,11 +213,61 @@ describe("palm paid report flow", () => {
     const r = await result;
     expect(r.steps).toEqual(["palm:image:palm", "palm:reading", "palm:offer"]);
     expect(llm.calls.some((c) => c.name === "analyze_customer_image")).toBe(true);
-    expect(slotsOf(r)).toMatchObject({ readings_given: 5, palm_media: ["wa:m4", "wa:m5"] });
+    expect(slotsOf(r)).toMatchObject({ readings_given: 5, free_turns: 5, palm_media: ["wa:m4", "wa:m5"] });
     expect(reportOf(r)).toMatchObject({ stage: "offered", offeredAt: NOW.toISOString() });
     expect(prompts[0]).toContain("free reading 5 of 5");
     expect(prompts[0]).toContain("https://razorpay.me/@askmypalm");
     expect(prompts[0]).toContain("₹499");
+    expect(r.reply).toContain("https://razorpay.me/@askmypalm");
+  });
+
+  it("counts a first greeting as a free answer but does not offer yet", async () => {
+    const { result, prompts } = run([customer("Hi Guruji")], emptySession());
+    const r = await result;
+    expect(r.steps).toEqual(["palm:request_photo"]);
+    expect(slotsOf(r).free_turns).toBe(1);
+    expect(reportOf(r).stage).toBe("none");
+    expect(prompts[0]).not.toContain("Close the sale");
+    expect(r.reply).not.toContain("razorpay.me");
+  });
+
+  it("does not offer on a mid-quota follow-up question", async () => {
+    const r = await run(
+      [customer("What about my career?")],
+      emptySession({ slots: { readings_given: 1, free_turns: 3 } }),
+    ).result;
+    expect(r.steps).toEqual(["palm:follow_up"]);
+    expect(slotsOf(r)).toMatchObject({ readings_given: 1, free_turns: 4 });
+    expect(reportOf(r).stage).toBe("none");
+    expect(r.reply).not.toContain("razorpay.me");
+  });
+
+  it("offers the paid report on the 5th question, not only the 5th palm photo", async () => {
+    const { result, prompts } = run(
+      [customer("And what about marriage?")],
+      emptySession({ slots: { readings_given: 1, free_turns: 4 } }),
+    );
+    const r = await result;
+    expect(r.steps).toEqual(["palm:follow_up", "palm:offer"]);
+    expect(slotsOf(r)).toMatchObject({ readings_given: 1, free_turns: 5 });
+    expect(reportOf(r)).toMatchObject({ stage: "offered", offeredAt: NOW.toISOString() });
+    expect(prompts[0]).toContain("Close the sale");
+    expect(prompts[0]).toContain("https://razorpay.me/@askmypalm");
+    expect(r.reply).toContain("https://razorpay.me/@askmypalm");
+  });
+
+  it("offers immediately on older chats that already used the free questions", async () => {
+    const transcript = [
+      customer("hi"),
+      customer("career?"),
+      customer("money?"),
+      customer("health?"),
+      customer("and marriage?"),
+    ];
+    const r = await run(transcript, emptySession({ slots: { readings_given: 1 } })).result;
+    expect(r.steps).toContain("palm:offer");
+    expect(slotsOf(r).free_turns).toBeGreaterThanOrEqual(5);
+    expect(reportOf(r).stage).toBe("offered");
     expect(r.reply).toContain("https://razorpay.me/@askmypalm");
   });
 

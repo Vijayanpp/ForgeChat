@@ -42,7 +42,10 @@ export function PalmConfigFields({ config, set }: { config: Draft; set: (patch: 
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Free readings" hint={paid ? "Readings before the report is offered." : undefined}>
+        <Field
+          label="Free answers"
+          hint={paid ? "Palm photos and follow-up questions before the paid report is offered." : undefined}
+        >
           <Input
             type="number"
             min={0}

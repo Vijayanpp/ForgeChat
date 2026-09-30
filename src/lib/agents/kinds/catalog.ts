@@ -35,7 +35,7 @@ export const palmReadingConfigSchema = baseConfig.extend({
   offer_name: z.string().trim().max(120).optional().default("Detailed personal reading"),
   offer_price: z.string().trim().max(60).optional().default(""),
   offer_link: optionalHttpsUrl,
-  /** Free readings given before the paid offer is introduced. */
+  /** Free answers (palm photos + follow-up questions) before the paid offer. */
   upsell_after_readings: z.number().int().min(0).max(10).optional().default(1),
   /**
    * Paid report flow: payment screenshot → verification → birth details

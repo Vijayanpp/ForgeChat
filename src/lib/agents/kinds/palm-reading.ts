@@ -31,6 +31,28 @@ export interface PalmPlan {
   readingsAfter: number;
 }
 
+/**
+ * Free quota = palm photos + answered questions.
+ * `readings_given` only counted photos, which is why Guruji kept answering
+ * follow-up questions past the limit without offering the report.
+ * When `free_turns` is missing (older sessions), seed from the larger of
+ * photos given and prior customer messages in this transcript.
+ */
+export function initialFreeTurns(args: {
+  slots: Record<string, unknown>;
+  readingsGiven: number;
+  transcript: ChatTurn[];
+}): number {
+  const stored = args.slots.free_turns;
+  if (stored != null && stored !== "") {
+    const n = Number(stored);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  }
+  const customerTurns = args.transcript.filter((t) => t.sender === "customer").length;
+  const priorAnswers = Math.max(0, customerTurns - 1);
+  return Math.max(args.readingsGiven, priorAnswers);
+}
+
 /** Pure stage decision, separated for testing. */
 export function planPalmTurn(args: {
   hasNewPhoto: boolean;
@@ -158,6 +180,8 @@ interface PaidState {
   slots: Record<string, unknown>;
   report: ReportSlots;
   readingsGiven: number;
+  /** Palm photos + answered questions. The paid offer fires when this hits the free limit. */
+  freeTurns: number;
   palmMedia: string[];
 }
 
@@ -181,6 +205,7 @@ function paidResult(
       slots: {
         ...state.slots,
         readings_given: state.readingsGiven,
+        free_turns: state.freeTurns,
         offer_made: state.report.stage !== "none",
         palm_media: state.palmMedia.slice(-4),
         report: state.report,
@@ -363,14 +388,16 @@ async function handleDetails(ctx: SpecialistContext<"palm_reading">, state: Paid
 async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<SpecialistResult> {
   const { config, transcript } = ctx;
   const slots = asRecord(ctx.session.slots);
+  const readingsGiven = Number(slots.readings_given ?? 0) || 0;
   const state: PaidState = {
     config,
     slots,
     report: readReportSlots(slots),
-    readingsGiven: Number(slots.readings_given ?? 0) || 0,
+    readingsGiven,
+    freeTurns: initialFreeTurns({ slots, readingsGiven, transcript }),
     palmMedia: palmMediaFromSlots(slots),
   };
-  const limit = config.upsell_after_readings;
+  const limit = Math.max(1, config.upsell_after_readings);
   const imageTurn = latestCustomerImageTurn(transcript);
   const photo = imageTurn?.imageDataUrls?.[0] ?? null;
 
@@ -387,7 +414,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     return handleDetails(ctx, state);
   }
 
-  const paidPhase = state.report.stage === "offered" || state.readingsGiven >= limit;
+  const paidPhase = state.report.stage === "offered" || state.freeTurns >= limit;
 
   if (photo && imageTurn) {
     const analysis = await analyzeCustomerImage(
@@ -432,13 +459,14 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     }
 
     state.readingsGiven += 1;
+    state.freeTurns += 1;
     if (imageTurn.mediaUrl) state.palmMedia = [...state.palmMedia.filter((m) => m !== imageTurn.mediaUrl), imageTurn.mediaUrl];
-    const offerNow = state.readingsGiven >= limit;
-    const remaining = Math.max(0, limit - state.readingsGiven);
+    const offerNow = state.freeTurns >= limit;
+    const remaining = Math.max(0, limit - state.freeTurns);
     if (offerNow) state.report = { ...state.report, stage: "offered", offeredAt: ctx.now.toISOString() };
     const r = await say(
       ctx,
-      `${MODE_INSTRUCTIONS.reading} This is free reading ${state.readingsGiven} of ${limit}.${
+      `${MODE_INSTRUCTIONS.reading} This is free reading ${state.freeTurns} of ${limit}.${
         offerNow
           ? `]\n[This was their last free reading. After the reading, close the sale with the detailed personalized Vedic astrology + palm report (emailed to them): ${offerScript(config)}`
           : ` They have ${remaining} free reading${remaining === 1 ? "" : "s"} left; they can send another palm photo (e.g. the other hand) or ask a question. Do not mention the paid plan unless they ask for it.`
@@ -453,22 +481,36 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     });
   }
 
-  if (state.readingsGiven === 0 && state.report.stage === "none") {
-    const r = await say(ctx, MODE_INSTRUCTIONS.request_photo);
-    return paidResult(state, { reply: r.text, usage: r.usage, steps: ["palm:request_photo"], stage: "awaiting_photo" });
+  if (state.freeTurns === 0 && state.report.stage === "none") {
+    state.freeTurns += 1;
+    const offerNow = state.freeTurns >= limit || wantsPaidPlan(latestCustomerText(transcript));
+    if (offerNow) state.report = { ...state.report, stage: "offered", offeredAt: ctx.now.toISOString() };
+    const r = await say(
+      ctx,
+      offerNow
+        ? `Answer briefly, then close the sale (this was their last free answer). Never send them to a website. ${offerScript(config)}`
+        : `${MODE_INSTRUCTIONS.request_photo} They have ${limit - state.freeTurns} free answer(s) left after this.`,
+    );
+    return paidResult(state, {
+      reply: r.text,
+      usage: r.usage,
+      steps: ["palm:request_photo", ...(offerNow ? ["palm:offer"] : [])],
+      stage: offerNow ? "awaiting_payment" : "awaiting_photo",
+    });
   }
 
   const latest = latestCustomerText(transcript);
   const askingForPlan = wantsPaidPlan(latest);
+  if (state.report.stage === "none" && !askingForPlan) state.freeTurns += 1;
   const offerNow =
-    (state.report.stage === "none" && state.readingsGiven >= limit) ||
-    (state.report.stage === "none" && askingForPlan);
+    state.report.stage === "none" && (state.freeTurns >= limit || askingForPlan);
   if (offerNow) state.report = { ...state.report, stage: "offered", offeredAt: ctx.now.toISOString() };
+  const remaining = Math.max(0, limit - state.freeTurns);
   const r = await say(
     ctx,
     state.report.stage === "offered" || askingForPlan
       ? `${MODE_INSTRUCTIONS.follow_up} Close the sale with the paid plan. Never send them to a website. ${offerScript(config)} If they say they've paid, ask for the payment screenshot — never treat their words alone as proof of payment.`
-      : `${MODE_INSTRUCTIONS.follow_up} They have ${limit - state.readingsGiven} free reading(s) left and can send another palm photo. If they ask for a detailed report, sell the paid plan with the exact price and payment URL — never a website.`,
+      : `${MODE_INSTRUCTIONS.follow_up} This is free answer ${state.freeTurns} of ${limit}. They have ${remaining} left. They can send a palm photo or ask another question. If they ask for a detailed report, sell the paid plan with the exact price and payment URL — never a website.`,
   );
   return paidResult(state, {
     reply: r.text,
