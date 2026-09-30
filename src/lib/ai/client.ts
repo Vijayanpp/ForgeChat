@@ -299,7 +299,7 @@ export async function generateAgentReply(
     ? `\n\n[Context: You are replying to a customer named ${contactName}]`
     : "";
   const visionNote = hasImages
-    ? `\n\n[The customer included photo(s) in this conversation. Study the image(s) closely — describe what you actually see (lines, shapes, lighting, hand position) before giving your reading.]`
+    ? `\n\n[The customer included photo(s) in this conversation. Study the image(s) closely and refer to specific details you can actually see before responding.]`
     : "";
 
   const model = hasImages ? "gpt-4o" : (agent.model || "gpt-4o");
