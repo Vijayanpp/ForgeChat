@@ -164,7 +164,7 @@ export function buildAgentGraph(deps: AgentGraphDeps) {
       update = {
         ...update,
         reply: attachPaymentOffer(update.reply, s.input.config as PalmReadingConfig, {
-          stage: s.sessionPatch.stage ?? s.input.session.stage,
+          stage: s.sessionPatch?.stage ?? s.input.session.stage,
           customerText: latestCustomerText(s.input.transcript),
         }),
       };
