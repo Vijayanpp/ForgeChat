@@ -565,6 +565,10 @@ export interface AiAgent {
   temperature: number;
   context_message_limit: number;
   status: 'active' | 'draft';
+  engine?: 'legacy' | 'langgraph';
+  agent_type?: 'customer_service' | 'palm_reading' | 'ticket_booking' | 'sales' | null;
+  config?: Record<string, unknown>;
+  config_version?: number;
   created_at: string;
   updated_at: string;
 }

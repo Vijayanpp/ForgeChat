@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveRuntimeFields } from "@/lib/agents/api";
 import { createClient } from "@/lib/supabase/server";
 import {
   assertAccountWritable,
@@ -87,9 +88,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "system_prompt is required" }, { status: 400 });
   }
 
+  const runtime = resolveRuntimeFields(body as Record<string, unknown>);
+  if (!runtime.ok) {
+    return NextResponse.json({ error: runtime.error }, { status: 400 });
+  }
+
   const { data, error } = await supabase
     .from("ai_agents")
     .insert({
+      ...runtime.fields,
       account_id: ctx.accountId,
       name: name.trim(),
       description: typeof description === "string" ? description.trim() || null : null,

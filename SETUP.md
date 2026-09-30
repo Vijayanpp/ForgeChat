@@ -129,6 +129,40 @@ NEXT_PUBLIC_SITE_URL=https://your-domain.com
 
 # Protects GET /api/automations/cron — set any long random string
 # AUTOMATION_CRON_SECRET=generate-a-long-random-string
+
+# ── SMART AI AGENTS (LangGraph) — all optional ───────────────────────
+# Kill switch: "false" makes smart agents skip every turn (simple agents unaffected)
+# AI_AGENTS_LANGGRAPH_ENABLED=true
+# Wait this long after the last customer message before replying (batches bursts)
+# AI_AGENT_DEBOUNCE_MS=4000
+# Agent stays silent for this many minutes after a human teammate replies
+# AI_AGENT_HUMAN_COOLDOWN_MIN=30
+# Per-account monthly token cap for smart agents (0 = unlimited)
+# AI_AGENT_MONTHLY_TOKEN_BUDGET=0
+# Cheap model used for classification, extraction and reply rewrites
+# AI_AGENT_CONTROL_MODEL=gpt-4o-mini
+# Model used when a customer sends a photo (palm reading)
+# AI_AGENT_VISION_MODEL=gpt-4o
+# AI_AGENT_TURN_TIMEOUT_MS=25000
+# AI_AGENT_MAX_ATTEMPTS=3
+# "inline" (default) runs jobs in-process; "cron" relies only on the worker endpoint
+# AI_AGENT_DISPATCH=inline
+# Protects GET /api/ai-agents/worker (header x-cron-secret)
+# AI_AGENT_CRON_SECRET=generate-a-long-random-string
+
+# Paid palm reports (palm-reading agent with "Paid detailed report" on).
+# Reports are emailed through Resend (https://resend.com) from your own domain.
+# RESEND_API_KEY=re_...
+# Default sender if the agent doesn't set one; the domain must be verified in Resend
+# REPORT_EMAIL_FROM=AskMyPalm <reports@yourdomain.com>
+
+# LangSmith tracing (inputs/outputs are redacted). Do NOT set LANGSMITH_TRACING —
+# that attaches an un-redacted global tracer.
+# AI_AGENT_LANGSMITH_TRACING=true
+# AI_AGENT_TRACE_SAMPLE_RATE=1
+# LANGSMITH_API_KEY=lsv2_...
+# LANGSMITH_PROJECT=ForgeChat Agents
+# LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 ```
 
 To generate a fresh `ENCRYPTION_KEY`:
@@ -217,6 +251,32 @@ Every 1–5 minutes is recommended. Options:
 - Any server cron / GitHub Actions schedule
 
 Set `AUTOMATION_CRON_SECRET` in `.env.local` to protect the endpoint.
+
+### Smart AI agent worker
+
+Smart agents (engine "Smart agent" in **AI Agents**) reply through a durable job queue. On a single long-running Node server jobs are processed in-process automatically. On serverless hosting, multiple instances, or with `AI_AGENT_DISPATCH=cron`, also call this every minute so no reply is stranded after a restart:
+
+```
+GET /api/ai-agents/worker      (header: x-cron-secret: <AI_AGENT_CRON_SECRET>)
+```
+
+Smart agents only run from an automation's **AI Reply** step — pick a smart agent there. Apply migration `032_ai_agent_runtime.sql` first.
+
+### Paid palm reports
+
+A palm-reading agent with **Paid detailed report** switched on gives the free readings, sends your payment link, checks the customer's payment screenshot, collects birth details and emails a full HTML report (plus a private link on WhatsApp).
+
+1. Apply migration `033_ai_agent_paid_reports.sql`.
+2. In [Resend](https://resend.com), add and verify your domain (it gives you SPF/DKIM DNS records), create an API key, and set `RESEND_API_KEY` and `REPORT_EMAIL_FROM`.
+3. `NEXT_PUBLIC_SITE_URL` must be your public URL — report links are `<site>/r/<token>`.
+4. In the agent: set the price, payment link (e.g. `razorpay.me/@yourhandle`) and the payee name(s) customers see on their UPI receipts. Optionally add Razorpay API keys (edit page) so `pay_…` IDs are confirmed with Razorpay.
+5. Screenshots the bot can't verify wait in **AI Agents → Payments & reports** for you to approve or reject.
+
+Reports take 1–2 minutes to write. They are generated in-process on a long-running server; on serverless hosting or with `AI_AGENT_DISPATCH=cron`, also call every minute:
+
+```
+GET /api/ai-agents/reports/worker   (header: x-cron-secret: <AI_AGENT_CRON_SECRET>, up to 5 min)
+```
 
 ---
 

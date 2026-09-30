@@ -10,9 +10,11 @@ import {
   Trash2,
   Loader2,
   Bot,
+  Receipt,
 } from "lucide-react";
 
 import type { AiAgent } from "@/types";
+import { AGENT_KIND_CATALOG } from "@/lib/agents/kinds/catalog";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
 import { useCan } from "@/hooks/use-can";
@@ -87,15 +89,25 @@ export default function AiAgentsPage() {
             Automations with the <strong className="text-slate-300">AI Reply</strong> step.
           </p>
         </div>
-        <GatedButton
-          canAct={canManage}
-          gateReason="create AI agents"
-          onClick={() => router.push("/ai-agents/new")}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="size-4" />
-          Create Agent
-        </GatedButton>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="border-slate-700 text-slate-300"
+            onClick={() => router.push("/ai-agents/payments")}
+          >
+            <Receipt className="size-4" />
+            Payments &amp; reports
+          </Button>
+          <GatedButton
+            canAct={canManage}
+            gateReason="create AI agents"
+            onClick={() => router.push("/ai-agents/new")}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="size-4" />
+            Create Agent
+          </GatedButton>
+        </div>
       </div>
 
       {error && (
@@ -136,6 +148,11 @@ export default function AiAgentsPage() {
               <div className="flex items-start justify-between gap-2 mb-3">
                 <div>
                   <h3 className="font-semibold text-white">{agent.name}</h3>
+                  {agent.engine === "langgraph" && agent.agent_type && (
+                    <p className="text-[11px] font-medium text-primary mt-0.5">
+                      Smart agent · {AGENT_KIND_CATALOG[agent.agent_type].label}
+                    </p>
+                  )}
                   {agent.description && (
                     <p className="text-xs text-slate-400 mt-1 line-clamp-2">
                       {agent.description}
