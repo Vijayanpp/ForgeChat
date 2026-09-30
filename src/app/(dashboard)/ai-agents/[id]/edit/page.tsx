@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { AiAgentForm } from "@/components/ai-agents/agent-form";
+import { RazorpayKeysCard } from "@/components/ai-agents/razorpay-keys-card";
 import type { AiAgent } from "@/types";
 
 export default function EditAiAgentPage() {
@@ -51,5 +52,10 @@ export default function EditAiAgentPage() {
     );
   }
 
-  return <AiAgentForm mode="edit" initial={agent} />;
+  return (
+    <>
+      <AiAgentForm mode="edit" initial={agent} />
+      {agent.agent_type === "palm_reading" && <RazorpayKeysCard agentId={agent.id} />}
+    </>
+  );
 }

@@ -519,14 +519,16 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       if (!args.contactId) throw new Error('ai_reply needs a contact')
       if (!cfg.agent_id) throw new Error('ai_reply needs agent_id')
       const conversationId = await resolveConversationId(args)
-      const { whatsapp_message_id, agentName } = await executeAgentReply({
+      const result = await executeAgentReply({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         agentId: cfg.agent_id,
         conversationId,
         contactId: args.contactId,
       })
-      return `ai reply sent via ${agentName} (${whatsapp_message_id})`
+      return result.kind === 'queued'
+        ? `ai reply ${result.enqueue} via ${result.agentName} (job ${result.jobId})`
+        : `ai reply sent via ${result.agentName} (${result.whatsapp_message_id})`
     }
 
     default:

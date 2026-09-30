@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
+import { resolveRuntimeFields } from "@/lib/agents/api";
 import { createClient } from "@/lib/supabase/server";
+
+/** Changes that alter agent behaviour bump config_version (traced per run). */
+const BEHAVIOUR_FIELDS = ["system_prompt", "model", "temperature", "context_message_limit"] as const;
 
 async function resolveAccountId(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -93,8 +97,31 @@ export async function PUT(
     update.status = body.status;
   }
 
+  const { data: existing, error: existingErr } = await supabase
+    .from("ai_agents")
+    .select("engine, agent_type, config, config_version")
+    .eq("id", id)
+    .eq("account_id", ctx.accountId)
+    .maybeSingle();
+  if (existingErr) {
+    return NextResponse.json({ error: existingErr.message }, { status: 500 });
+  }
+  if (!existing) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const runtime = resolveRuntimeFields(body as Record<string, unknown>, existing);
+  if (!runtime.ok) {
+    return NextResponse.json({ error: runtime.error }, { status: 400 });
+  }
+  if (runtime.changed) Object.assign(update, runtime.fields);
+
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+  }
+
+  if (runtime.changed || BEHAVIOUR_FIELDS.some((f) => f in update)) {
+    update.config_version = ((existing.config_version as number | null) ?? 1) + 1;
   }
 
   const { data, error } = await supabase

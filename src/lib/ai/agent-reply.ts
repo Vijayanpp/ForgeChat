@@ -1,5 +1,6 @@
 import { generateAgentReply, type ChatMessage } from "@/lib/ai/client";
 import { downloadWhatsAppImageDataUrl } from "@/lib/ai/resolve-message-media";
+import { enqueueAgentTurn, usesLangGraphRuntime } from "@/lib/agents";
 import { engineSendText } from "@/lib/automations/meta-send";
 import { supabaseAdmin } from "@/lib/automations/admin-client";
 
@@ -12,7 +13,12 @@ export interface AiAgentRow {
   temperature: number;
   context_message_limit: number;
   status: string;
+  engine?: string | null;
 }
+
+export type AgentReplyOutcome =
+  | { kind: "sent"; whatsapp_message_id: string; agentName: string }
+  | { kind: "queued"; jobId: string; enqueue: string; agentName: string };
 
 interface MessageRow {
   sender_type: string;
@@ -67,7 +73,7 @@ export async function fetchConversationContext(
       (imageDataUrls
         ? ""
         : row.content_type === "image"
-          ? "I sent you a photo of my palm."
+          ? "[Customer sent a photo]"
           : "");
 
     if (!text && !imageDataUrls?.length) continue;
@@ -88,7 +94,7 @@ export async function executeAgentReply(args: {
   agentId: string;
   conversationId: string;
   contactId: string;
-}): Promise<{ whatsapp_message_id: string; agentName: string }> {
+}): Promise<AgentReplyOutcome> {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
@@ -109,6 +115,17 @@ export async function executeAgentReply(args: {
   const typed = agent as AiAgentRow;
   if (typed.status !== "active") {
     throw new Error(`AI agent "${typed.name}" is not active`);
+  }
+
+  if (usesLangGraphRuntime(typed)) {
+    const { jobId, outcome } = await enqueueAgentTurn({
+      accountId: args.accountId,
+      userId: args.userId,
+      agentId: args.agentId,
+      conversationId: args.conversationId,
+      contactId: args.contactId,
+    });
+    return { kind: "queued", jobId, enqueue: outcome, agentName: typed.name };
   }
 
   const { data: contact, error: contactErr } = await db
@@ -152,5 +169,5 @@ export async function executeAgentReply(args: {
     aiAgentId: args.agentId,
   });
 
-  return { whatsapp_message_id, agentName: typed.name };
+  return { kind: "sent", whatsapp_message_id, agentName: typed.name };
 }
