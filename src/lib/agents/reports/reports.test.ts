@@ -139,7 +139,12 @@ describe("processReport", () => {
   });
 
   function deps(agentConfig: Record<string, unknown>, email: EmailSender | null) {
-    const { db, updates } = fakeDb({ business_name: "AskMyPalm", paid_report_enabled: true, ...agentConfig });
+    const { db, updates } = fakeDb({
+      business_name: "AskMyPalm",
+      paid_report_enabled: true,
+      payment_link: "https://razorpay.me/@askmypalm",
+      ...agentConfig,
+    });
     const texts: string[] = [];
     const llm = reportLlm();
     const d: ReportWorkerDeps = {

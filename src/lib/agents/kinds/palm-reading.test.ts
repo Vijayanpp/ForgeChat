@@ -6,7 +6,8 @@ import { customer, emptySession, fakeLlm, systemText, testAgent, testRuntime, te
 import type { ChatTurn, SessionState } from "../types";
 import { parseAgentConfig } from "./catalog";
 import type { ReportRequest, SpecialistServices } from "./contract";
-import { palmReadingSpecialist, payeeAliases, planPalmTurn } from "./palm-reading";
+import { palmReadingSpecialist, payeeAliases, planPalmTurn, offerScript, withPaymentOffer } from "./palm-reading";
+import { attachPaymentOffer } from "./palm-offer";
 
 describe("planPalmTurn", () => {
   it("asks for a photo first, reads it, then offers after the free readings", () => {
@@ -108,6 +109,46 @@ describe("palm paid report flow", () => {
     expect(payeeAliases(config)).toEqual(["askmypalm", "AskMyPalm"]);
   });
 
+  it("offer script names the price and Razorpay link and forbids a website pitch", () => {
+    const script = offerScript({ ...config, report_price_inr: 399 });
+    expect(script).toContain("₹399");
+    expect(script).toContain("https://razorpay.me/@askmypalm");
+    expect(script).toContain("Never say \"visit our website\"");
+    expect(script).toContain("[payment link](#)");
+  });
+
+  it("replaces placeholder markdown links with the real Razorpay URL", () => {
+    const fake = "You can follow this [payment link](#) to proceed.";
+    const out = withPaymentOffer(fake, { ...config, report_price_inr: 399 });
+    expect(out).not.toContain("[payment link]");
+    expect(out).not.toContain("(#)");
+    expect(out).toContain("https://razorpay.me/@askmypalm");
+    expect(out).toContain("₹399");
+  });
+
+  it("replaces a website pitch with the ₹399 Razorpay plan", () => {
+    const website =
+      "I'm glad you're interested. You can visit our Askmypalm website and purchase the report there.";
+    const out = withPaymentOffer(website, { ...config, report_price_inr: 399 });
+    expect(out.toLowerCase()).not.toMatch(/visit our|askmypalm website/);
+    expect(out).toContain("₹399");
+    expect(out).toContain("https://razorpay.me/@askmypalm");
+    expect(out).toContain("payment screenshot");
+  });
+
+  it("does not duplicate the link when the model already pasted it", () => {
+    const ok = "Pay ₹499 here:\nhttps://razorpay.me/@askmypalm";
+    expect(withPaymentOffer(ok, config)).toBe(ok);
+  });
+
+  it("pins the Razorpay URL when the customer asks for the report, even with no palm photo yet", () => {
+    const out = attachPaymentOffer("You can follow this [payment link](#) to proceed.", config, {
+      customerText: "I want the detailed report",
+    });
+    expect(out).toContain("https://razorpay.me/@askmypalm");
+    expect(out).not.toContain("[payment link]");
+  });
+
   it("gives free readings and offers the report with the last one", async () => {
     const { result, prompts, llm } = run([photo("m5")], emptySession({ slots: { readings_given: 4, palm_media: ["wa:m4"] } }));
     const r = await result;
@@ -118,6 +159,7 @@ describe("palm paid report flow", () => {
     expect(prompts[0]).toContain("free reading 5 of 5");
     expect(prompts[0]).toContain("https://razorpay.me/@askmypalm");
     expect(prompts[0]).toContain("₹499");
+    expect(r.reply).toContain("https://razorpay.me/@askmypalm");
   });
 
   it("does not read more palms once the free readings are used", async () => {

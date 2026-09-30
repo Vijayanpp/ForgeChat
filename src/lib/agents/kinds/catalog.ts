@@ -53,6 +53,14 @@ export const palmReadingConfigSchema = baseConfig.extend({
   report_email_from: z.string().trim().max(200).optional().default(""),
   report_reply_to: z.union([z.string().trim().email(), z.literal("")]).optional().default(""),
   report_model: z.string().trim().max(60).optional().default("gpt-4o"),
+}).superRefine((c, ctx) => {
+  if (c.paid_report_enabled && !(c.payment_link || c.offer_link)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["payment_link"],
+      message: "Payment link is required when Paid detailed report is on",
+    });
+  }
 });
 
 export const bookingFieldSchema = z.object({

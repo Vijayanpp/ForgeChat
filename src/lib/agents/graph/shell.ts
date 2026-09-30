@@ -24,6 +24,9 @@ import {
   type SkipReason,
   type Usage,
 } from "../types";
+import { latestCustomerText } from "../llm/context";
+import { attachPaymentOffer } from "../kinds/palm-offer";
+import type { PalmReadingConfig } from "../kinds/catalog";
 import { classifyTurn, requiresHandoff, type Classification } from "./classify";
 import { evaluateGate } from "./gate";
 import { checkReply, stripViolations } from "./guard";
@@ -130,28 +133,43 @@ export function buildAgentGraph(deps: AgentGraphDeps) {
 
   const guard = async (s: AgentGraphStateType, config?: RunnableConfig): Promise<Update> => {
     const first = checkReply(s.reply ?? "");
-    if (first.violations.length === 0) return { reply: first.text, nodePath: ["guard:pass"] };
-
-    // One rewrite with the control model; no specialist re-run, so
-    // side effects (bookings) never repeat.
-    const rewrite = await deps.llm.chat(
-      { model: deps.runtime.controlModel, temperature: 0.3, maxTokens: 500 },
-      [
-        new SystemMessage(
-          `Rewrite this WhatsApp message so it fixes these problems: ${first.violations.join("; ")}. Keep every fact, the language and the tone. Never mention AI or models. Output only the message.`,
-        ),
-        new HumanMessage(first.text || "(empty)"),
-      ],
-      config,
-    );
-    const second = checkReply(rewrite.text);
-    if (second.violations.length === 0) {
-      return { reply: second.text, usage: rewrite.usage, nodePath: ["guard:rewritten"] };
+    let update: Update;
+    if (first.violations.length === 0) {
+      update = { reply: first.text, nodePath: ["guard:pass"] };
+    } else {
+      // One rewrite with the control model; no specialist re-run, so
+      // side effects (bookings) never repeat.
+      const rewrite = await deps.llm.chat(
+        { model: deps.runtime.controlModel, temperature: 0.3, maxTokens: 500 },
+        [
+          new SystemMessage(
+            `Rewrite this WhatsApp message so it fixes these problems: ${first.violations.join("; ")}. Keep every fact, the language and the tone. Never mention AI or models. Output only the message.`,
+          ),
+          new HumanMessage(first.text || "(empty)"),
+        ],
+        config,
+      );
+      const second = checkReply(rewrite.text);
+      if (second.violations.length === 0) {
+        update = { reply: second.text, usage: rewrite.usage, nodePath: ["guard:rewritten"] };
+      } else {
+        const salvaged = stripViolations(second.text);
+        update = salvaged
+          ? { reply: salvaged, usage: rewrite.usage, nodePath: ["guard:stripped"] }
+          : { reply: null, handoff: true, usage: rewrite.usage, nodePath: ["guard:failed"] };
+      }
     }
 
-    const salvaged = stripViolations(second.text);
-    if (salvaged) return { reply: salvaged, usage: rewrite.usage, nodePath: ["guard:stripped"] };
-    return { reply: null, handoff: true, usage: rewrite.usage, nodePath: ["guard:failed"] };
+    if (s.input.kind === "palm_reading" && update.reply) {
+      update = {
+        ...update,
+        reply: attachPaymentOffer(update.reply, s.input.config as PalmReadingConfig, {
+          stage: s.sessionPatch.stage ?? s.input.session.stage,
+          customerText: latestCustomerText(s.input.transcript),
+        }),
+      };
+    }
+    return update;
   };
 
   const handoff = (s: AgentGraphStateType): Update => ({

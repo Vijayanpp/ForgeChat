@@ -1,6 +1,7 @@
 import { generateAgentReply, type ChatMessage } from "@/lib/ai/client";
 import { downloadWhatsAppImageDataUrl } from "@/lib/ai/resolve-message-media";
 import { enqueueAgentTurn, usesLangGraphRuntime } from "@/lib/agents";
+import { withPalmPaymentPrompt, withPalmPaymentReply } from "@/lib/agents/kinds/palm-offer";
 import { engineSendText } from "@/lib/automations/meta-send";
 import { supabaseAdmin } from "@/lib/automations/admin-client";
 
@@ -14,6 +15,8 @@ export interface AiAgentRow {
   context_message_limit: number;
   status: string;
   engine?: string | null;
+  agent_type?: string | null;
+  config?: unknown;
 }
 
 export type AgentReplyOutcome =
@@ -150,14 +153,18 @@ export async function executeAgentReply(args: {
     throw new Error("no messages to generate a reply from");
   }
 
-  const replyText = await generateAgentReply(
-    messages,
-    {
-      system_prompt: typed.system_prompt,
-      model: typed.model,
-      temperature: Number(typed.temperature),
-    },
-    contactName,
+  const replyText = withPalmPaymentReply(
+    await generateAgentReply(
+      messages,
+      {
+        system_prompt: withPalmPaymentPrompt(typed.system_prompt, typed),
+        model: typed.model,
+        temperature: Number(typed.temperature),
+      },
+      contactName,
+    ),
+    typed,
+    messages.at(-1)?.content ?? "",
   );
 
   const { whatsapp_message_id } = await engineSendText({

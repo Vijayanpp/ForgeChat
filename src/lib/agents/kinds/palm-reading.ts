@@ -7,6 +7,7 @@ import { analyzeCustomerImage } from "../payments/receipt";
 import { addUsage, ZERO_USAGE, type ChatTurn, type Usage } from "../types";
 import type { PalmReadingConfig } from "./catalog";
 import type { SpecialistContext, SpecialistResult, Specialist } from "./contract";
+import { attachPaymentOffer, offerScript, paymentFactsForPrompt, wantsPaidPlan } from "./palm-offer";
 import {
   decideDetailsAction,
   DETAIL_LABELS,
@@ -60,11 +61,11 @@ const MODE_INSTRUCTIONS: Record<PalmMode, string> = {
 const SAFETY = "\n[Never make medical, legal or financial predictions. Present readings as guidance, not certainty.]";
 
 function persona(ctx: SpecialistContext<"palm_reading">): string {
-  return personaSystemPrompt({
+  return `${personaSystemPrompt({
     personaPrompt: ctx.agent.system_prompt,
     businessName: ctx.config.business_name,
     contactName: ctx.contactName,
-  });
+  })}${paymentFactsForPrompt(ctx.config)}`;
 }
 
 async function say(
@@ -99,11 +100,7 @@ export function payeeAliases(config: PalmReadingConfig): string[] {
   return [...new Set(aliases.map((a) => a.trim()).filter((a) => a.length >= 3))];
 }
 
-function offerLine(config: PalmReadingConfig): string {
-  return `${config.offer_name || "Detailed personal report"} — ₹${config.report_price_inr}. Payment link: ${
-    config.payment_link || "(ask the team for the payment link)"
-  }. After paying, they should send the payment screenshot here.`;
-}
+export { offerScript, withPaymentOffer } from "./palm-offer";
 
 // ---------------------------------------------------------------- free flow
 
@@ -121,16 +118,8 @@ async function runFreeFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     upsellAfterReadings: config.upsell_after_readings,
   });
 
-  const offer = [
-    config.offer_name,
-    config.offer_price ? `(${config.offer_price})` : "",
-    config.offer_link ? `— link: ${config.offer_link}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
   const instruction = `${MODE_INSTRUCTIONS[plan.mode]}${
-    plan.offerNow ? `]\n[After giving value, gently introduce the paid offer: ${offer}. One or two sentences, no pressure.` : ""
+    plan.offerNow ? `]\n[After the reading, close the sale with this paid plan. ${offerScript(config)}` : ""
   }`;
   const { text, usage } = await say(ctx, instruction, {
     vision: plan.mode === "reading",
@@ -138,7 +127,10 @@ async function runFreeFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
   });
 
   return {
-    reply: text,
+    reply: attachPaymentOffer(text, config, {
+      stage: plan.offerNow ? "offer_made" : undefined,
+      customerText: latestCustomerText(transcript),
+    }),
     usage,
     steps: [`palm:${plan.mode}`, ...(plan.offerNow ? ["palm:offer"] : [])],
     session: {
@@ -162,6 +154,7 @@ const detailsSchema = z.object({
 });
 
 interface PaidState {
+  config: PalmReadingConfig;
   slots: Record<string, unknown>;
   report: ReportSlots;
   readingsGiven: number;
@@ -173,7 +166,7 @@ function paidResult(
   out: { reply: string | null; usage: Usage; steps: string[]; stage: string; handoff?: boolean },
 ): SpecialistResult {
   return {
-    reply: out.reply,
+    reply: out.reply ? attachPaymentOffer(out.reply, state.config, { stage: out.stage }) : out.reply,
     handoff: out.handoff,
     usage: out.usage,
     steps: out.steps,
@@ -365,6 +358,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
   const { config, transcript } = ctx;
   const slots = asRecord(ctx.session.slots);
   const state: PaidState = {
+    config,
     slots,
     report: readReportSlots(slots),
     readingsGiven: Number(slots.readings_given ?? 0) || 0,
@@ -400,8 +394,8 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     const r = await say(
       ctx,
       analysis.data.image_type === "palm"
-        ? `They sent another palm photo, but their ${limit} free readings are complete. Do not give a new reading. Kindly explain, and invite them to the detailed personalized report: ${offerLine(config)}`
-        : `The image doesn't look like a palm photo or a payment screenshot. Ask kindly what they meant. If they have paid, ask for the payment screenshot. Offer: ${offerLine(config)}`,
+        ? `They sent another palm photo, but their ${limit} free readings are complete. Do not give a new reading. Kindly explain, then close the sale: ${offerScript(config)}`
+        : `The image doesn't look like a palm photo or a payment screenshot. Ask kindly what they meant. If they have paid, ask for the payment screenshot. Otherwise close the sale: ${offerScript(config)}`,
     );
     return paidResult(state, { reply: r.text, usage: addUsage(analysis.usage, r.usage), steps, stage: "awaiting_payment" });
   }
@@ -416,7 +410,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
       ctx,
       `${MODE_INSTRUCTIONS.reading} This is free reading ${state.readingsGiven} of ${limit}.${
         offerNow
-          ? `]\n[This was their last free reading. After the reading, introduce the detailed personalized Vedic astrology + palm report (a complete multi-chapter report emailed to them): ${offerLine(config)}`
+          ? `]\n[This was their last free reading. After the reading, close the sale with the detailed personalized Vedic astrology + palm report (emailed to them): ${offerScript(config)}`
           : ` They have ${remaining} free reading${remaining === 1 ? "" : "s"} left; they can send another palm photo (e.g. the other hand) or ask a question.`
       }`,
       { vision: true, maxTokens: 900 },
@@ -434,15 +428,17 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     return paidResult(state, { reply: r.text, usage: r.usage, steps: ["palm:request_photo"], stage: "awaiting_photo" });
   }
 
-  const offerNow = state.report.stage === "none" && state.readingsGiven >= limit;
+  const latest = latestCustomerText(transcript);
+  const askingForPlan = wantsPaidPlan(latest);
+  const offerNow =
+    (state.report.stage === "none" && state.readingsGiven >= limit) ||
+    (state.report.stage === "none" && askingForPlan);
   if (offerNow) state.report = { ...state.report, stage: "offered", offeredAt: ctx.now.toISOString() };
   const r = await say(
     ctx,
-    state.report.stage === "offered"
-      ? `${MODE_INSTRUCTIONS.follow_up} Their free readings are complete${
-          offerNow ? "; introduce" : "; if relevant, remind them of"
-        } the detailed report: ${offerLine(config)} If they say they've paid, ask for the payment screenshot — never treat their words alone as proof of payment.`
-      : `${MODE_INSTRUCTIONS.follow_up} They have ${limit - state.readingsGiven} free reading(s) left and can send another palm photo.`,
+    state.report.stage === "offered" || askingForPlan
+      ? `${MODE_INSTRUCTIONS.follow_up} Close the sale with the paid plan. Never send them to a website. ${offerScript(config)} If they say they've paid, ask for the payment screenshot — never treat their words alone as proof of payment.`
+      : `${MODE_INSTRUCTIONS.follow_up} They have ${limit - state.readingsGiven} free reading(s) left and can send another palm photo. If they ask for a detailed report, sell the paid plan with the exact price and payment URL — never a website.`,
   );
   return paidResult(state, {
     reply: r.text,

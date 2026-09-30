@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateAgentReply, type ChatMessage } from "@/lib/ai/client";
 import { parseAgentConfig } from "@/lib/agents/kinds/catalog";
+import { withPalmPaymentPrompt, withPalmPaymentReply } from "@/lib/agents/kinds/palm-offer";
 import { dryRunAgentDeps } from "@/lib/agents/runtime/deps";
 import { runAgentTurn } from "@/lib/agents/runtime/run-turn";
 import { freshSession } from "@/lib/agents/runtime/session-store";
@@ -157,14 +158,18 @@ export async function POST(
   const messages: ChatMessage[] = [{ role: "user", content: sampleMessage }];
 
   try {
-    const reply = await generateAgentReply(
-      messages,
-      {
-        system_prompt: agent.system_prompt as string,
-        model: agent.model as string,
-        temperature: Number(agent.temperature),
-      },
-      "Test Customer",
+    const reply = withPalmPaymentReply(
+      await generateAgentReply(
+        messages,
+        {
+          system_prompt: withPalmPaymentPrompt(agent.system_prompt as string, agent),
+          model: agent.model as string,
+          temperature: Number(agent.temperature),
+        },
+        "Test Customer",
+      ),
+      agent,
+      sampleMessage,
     );
     return NextResponse.json({ reply });
   } catch (err) {

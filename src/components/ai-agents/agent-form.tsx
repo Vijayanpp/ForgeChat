@@ -52,7 +52,7 @@ export function AiAgentForm({ mode, initial }: AiAgentFormProps) {
   const [contextLimit, setContextLimit] = useState(
     initial?.context_message_limit ?? 15,
   );
-  const [isActive, setIsActive] = useState(initial?.status === "active");
+  const [isActive, setIsActive] = useState(initial ? initial.status === "active" : true);
   const [engine, setEngine] = useState<AgentEngine>(initial?.engine ?? "legacy");
   const [kind, setKind] = useState<AgentKind>(initial?.agent_type ?? "customer_service");
   const [config, setConfig] = useState<AgentConfigDraft>(
@@ -419,7 +419,7 @@ export function AiAgentForm({ mode, initial }: AiAgentFormProps) {
           <div>
             <p className="text-sm font-medium text-white">Active</p>
             <p className="text-xs text-slate-400">
-              Only active agents can be used in automations
+              Off = draft. WhatsApp automations will not reply until this is on. The Test box still works while it is off.
             </p>
           </div>
           <Switch checked={isActive} onCheckedChange={setIsActive} />
