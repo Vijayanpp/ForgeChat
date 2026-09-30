@@ -41,9 +41,9 @@ Hard rules:
 export function paymentFactsForPrompt(config: PalmReadingConfig): string {
   const link = planLink(config);
   const price = planPrice(config);
-  return `\n\n[Paid plan — the ONLY way to buy. Paste as plain text, never markdown like [payment link](#), never send them to a website.]\nName: ${planName(config)}\nPrice: ${price}${
+  return `\n\n[Paid plan facts — use ONLY when this turn is actually selling the report. If payment is already received, or you are giving a free reading, or collecting birth details, do not mention the price or payment link.]\nName: ${planName(config)}\nPrice: ${price}${
     link ? `\nPay here: ${link}` : ""
-  }\nAfter paying they send the payment screenshot in this chat. Do not mention a website.`;
+  }\nAfter paying they send the payment screenshot in this chat. Never send them to a website.`;
 }
 
 const WEBSITE_PITCH =
@@ -88,22 +88,31 @@ const SKIP_PLAN = new Set([
   "payment_issue",
 ]);
 
-/** Pin the live URL onto selling replies, and onto every paid-report turn except details/delivery. */
+const PAID_REPORT_STAGES = new Set(["collecting", "confirming", "waiting_payment", "queued"]);
+
+/** Pin the live URL only while we are still selling — never after payment, never on every chat. */
 export function attachPaymentOffer(
   reply: string | null,
   config: PalmReadingConfig,
-  ctx: { stage?: string; customerText?: string } = {},
+  ctx: {
+    stage?: string;
+    customerText?: string;
+    reportStage?: string;
+    paymentStatus?: string | null;
+  } = {},
 ): string | null {
   if (!reply) return reply;
   const stage = ctx.stage ?? "";
-  if (SKIP_PLAN.has(stage)) return stripWebsitePitch(reply);
+  const alreadyPaid =
+    ctx.paymentStatus === "verified" ||
+    ctx.paymentStatus === "pending_review" ||
+    PAID_REPORT_STAGES.has(ctx.reportStage ?? "") ||
+    SKIP_PLAN.has(stage);
+  if (alreadyPaid) return stripWebsitePitch(reply);
+
   const selling =
-    config.paid_report_enabled ||
-    stage === "awaiting_payment" ||
-    stage === "offer_made" ||
-    wantsPaidPlan(ctx.customerText ?? "") ||
-    wantsPaidPlan(reply);
-  return selling ? withPaymentOffer(reply, config) : reply;
+    stage === "awaiting_payment" || stage === "offer_made" || wantsPaidPlan(ctx.customerText ?? "");
+  return selling ? withPaymentOffer(reply, config) : stripWebsitePitch(reply);
 }
 
 export function palmPayFromAgent(agent: { agent_type?: string | null; config?: unknown }): PalmReadingConfig | null {

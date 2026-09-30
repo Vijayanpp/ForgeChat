@@ -166,7 +166,13 @@ function paidResult(
   out: { reply: string | null; usage: Usage; steps: string[]; stage: string; handoff?: boolean },
 ): SpecialistResult {
   return {
-    reply: out.reply ? attachPaymentOffer(out.reply, state.config, { stage: out.stage }) : out.reply,
+    reply: out.reply
+      ? attachPaymentOffer(out.reply, state.config, {
+          stage: out.stage,
+          reportStage: state.report.stage,
+          paymentStatus: state.report.paymentStatus,
+        })
+      : out.reply,
     handoff: out.handoff,
     usage: out.usage,
     steps: out.steps,
@@ -383,24 +389,48 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
 
   const paidPhase = state.report.stage === "offered" || state.readingsGiven >= limit;
 
-  if (photo && imageTurn && paidPhase) {
-    const analysis = await analyzeCustomerImage(ctx.llm, replySpec(ctx, { vision: true, maxTokens: 500 }), photo, ctx.runnableConfig);
-    const steps = [`palm:image:${analysis.data.image_type}`];
+  if (photo && imageTurn) {
+    const analysis = await analyzeCustomerImage(
+      ctx.llm,
+      replySpec(ctx, { vision: true, maxTokens: 500 }),
+      photo,
+      ctx.runnableConfig,
+    );
+    const imageStep = `palm:image:${analysis.data.image_type}`;
     if (analysis.data.image_type === "payment_receipt") {
       const result = await handlePaymentScreenshot(ctx, state, analysis.data, imageTurn, analysis.usage);
-      return { ...result, steps: [...steps, ...result.steps] };
+      return { ...result, steps: [imageStep, ...result.steps] };
     }
-    if (state.report.stage === "none") state.report = { ...state.report, stage: "offered", offeredAt: ctx.now.toISOString() };
-    const r = await say(
-      ctx,
-      analysis.data.image_type === "palm"
-        ? `They sent another palm photo, but their ${limit} free readings are complete. Do not give a new reading. Kindly explain, then close the sale: ${offerScript(config)}`
-        : `The image doesn't look like a palm photo or a payment screenshot. Ask kindly what they meant. If they have paid, ask for the payment screenshot. Otherwise close the sale: ${offerScript(config)}`,
-    );
-    return paidResult(state, { reply: r.text, usage: addUsage(analysis.usage, r.usage), steps, stage: "awaiting_payment" });
-  }
 
-  if (photo && imageTurn) {
+    if (paidPhase) {
+      if (state.report.stage === "none") state.report = { ...state.report, stage: "offered", offeredAt: ctx.now.toISOString() };
+      const r = await say(
+        ctx,
+        analysis.data.image_type === "palm"
+          ? `They sent another palm photo, but their ${limit} free readings are complete. Do not give a new reading. Kindly explain, then close the sale: ${offerScript(config)}`
+          : `The image doesn't look like a palm photo or a payment screenshot. Ask kindly what they meant. If they have paid, ask for the payment screenshot. Otherwise close the sale: ${offerScript(config)}`,
+      );
+      return paidResult(state, {
+        reply: r.text,
+        usage: addUsage(analysis.usage, r.usage),
+        steps: [imageStep],
+        stage: "awaiting_payment",
+      });
+    }
+
+    if (analysis.data.image_type !== "palm") {
+      const r = await say(
+        ctx,
+        `The image is not a palm photo. Kindly ask for a clear palm photo for a free reading. If they meant to pay for the detailed report, ask them to send the payment screenshot of ₹${config.report_price_inr}. Do not give a palm reading from this image.`,
+      );
+      return paidResult(state, {
+        reply: r.text,
+        usage: addUsage(analysis.usage, r.usage),
+        steps: [imageStep],
+        stage: state.report.stage === "offered" ? "awaiting_payment" : "awaiting_photo",
+      });
+    }
+
     state.readingsGiven += 1;
     if (imageTurn.mediaUrl) state.palmMedia = [...state.palmMedia.filter((m) => m !== imageTurn.mediaUrl), imageTurn.mediaUrl];
     const offerNow = state.readingsGiven >= limit;
@@ -411,14 +441,14 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
       `${MODE_INSTRUCTIONS.reading} This is free reading ${state.readingsGiven} of ${limit}.${
         offerNow
           ? `]\n[This was their last free reading. After the reading, close the sale with the detailed personalized Vedic astrology + palm report (emailed to them): ${offerScript(config)}`
-          : ` They have ${remaining} free reading${remaining === 1 ? "" : "s"} left; they can send another palm photo (e.g. the other hand) or ask a question.`
+          : ` They have ${remaining} free reading${remaining === 1 ? "" : "s"} left; they can send another palm photo (e.g. the other hand) or ask a question. Do not mention the paid plan unless they ask for it.`
       }`,
       { vision: true, maxTokens: 900 },
     );
     return paidResult(state, {
       reply: r.text,
-      usage: r.usage,
-      steps: ["palm:reading", ...(offerNow ? ["palm:offer"] : [])],
+      usage: addUsage(analysis.usage, r.usage),
+      steps: [imageStep, "palm:reading", ...(offerNow ? ["palm:offer"] : [])],
       stage: offerNow ? "awaiting_payment" : "reading_given",
     });
   }

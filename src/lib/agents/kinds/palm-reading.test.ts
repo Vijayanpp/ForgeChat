@@ -67,7 +67,15 @@ function run(transcript: ChatTurn[], session: SessionState, script: Scripted = {
   const prompts: string[] = [];
   const llm = fakeLlm(
     {
-      analyze_customer_image: () => ({ ...goodReceipt, ...script.image }),
+      analyze_customer_image: () => ({
+        ...goodReceipt,
+        image_type: "palm",
+        payment_status: "unknown",
+        amount: 0,
+        utr: "",
+        razorpay_payment_id: "",
+        ...script.image,
+      }),
       report_details_extract: () => ({
         full_name: "",
         date_of_birth: "",
@@ -149,11 +157,33 @@ describe("palm paid report flow", () => {
     expect(out).not.toContain("[payment link]");
   });
 
+  it("does not pin the plan after payment is received", () => {
+    const thanks = "Thank you for the payment, Pp! Could you send a palm photo?";
+    const out = attachPaymentOffer(thanks, config, {
+      stage: "collecting_details",
+      reportStage: "collecting",
+      paymentStatus: "verified",
+    });
+    expect(out).not.toContain("razorpay.me");
+  });
+
+  it("does not pin the plan on ordinary chat just because paid reports are on", () => {
+    const out = attachPaymentOffer("Here is your free reading.", config, { stage: "reading_given" });
+    expect(out).not.toContain("razorpay.me");
+  });
+
+  it("accepts a payment screenshot before the free readings are finished", async () => {
+    const r = await run([photo("pay-early")], emptySession(), { image: goodReceipt }).result;
+    expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:verified"]);
+    expect(reportOf(r)).toMatchObject({ stage: "collecting", paymentStatus: "verified" });
+    expect(r.reply).not.toContain("razorpay.me");
+  });
+
   it("gives free readings and offers the report with the last one", async () => {
     const { result, prompts, llm } = run([photo("m5")], emptySession({ slots: { readings_given: 4, palm_media: ["wa:m4"] } }));
     const r = await result;
-    expect(r.steps).toEqual(["palm:reading", "palm:offer"]);
-    expect(llm.calls.some((c) => c.name === "analyze_customer_image")).toBe(false);
+    expect(r.steps).toEqual(["palm:image:palm", "palm:reading", "palm:offer"]);
+    expect(llm.calls.some((c) => c.name === "analyze_customer_image")).toBe(true);
     expect(slotsOf(r)).toMatchObject({ readings_given: 5, palm_media: ["wa:m4", "wa:m5"] });
     expect(reportOf(r)).toMatchObject({ stage: "offered", offeredAt: NOW.toISOString() });
     expect(prompts[0]).toContain("free reading 5 of 5");
@@ -173,7 +203,7 @@ describe("palm paid report flow", () => {
 
   it("verifies a payment screenshot and asks for birth details", async () => {
     const session = emptySession({ slots: { readings_given: 5, report: { stage: "offered", offeredAt: "2026-09-30T09:00:00Z" } } });
-    const { result, prompts } = run([photo("m7")], session);
+    const { result, prompts } = run([photo("m7")], session, { image: goodReceipt });
     const r = await result;
     expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:verified"]);
     expect(reportOf(r)).toMatchObject({ stage: "collecting", paymentId: "TEST-PAYMENT", paymentStatus: "verified" });
@@ -183,7 +213,7 @@ describe("palm paid report flow", () => {
 
   it("hands off after three rejected screenshots", async () => {
     const session = emptySession({ slots: { readings_given: 5, report: { stage: "offered", rejections: 2 } } });
-    const r = await run([photo("m8")], session, { image: { amount: 49 } }).result;
+    const r = await run([photo("m8")], session, { image: { ...goodReceipt, amount: 49 } }).result;
     expect(r.handoff).toBe(true);
     expect(r.reply).toBeNull();
     expect(reportOf(r)).toMatchObject({ rejections: 3 });

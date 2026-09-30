@@ -26,6 +26,8 @@ import {
 } from "../types";
 import { latestCustomerText } from "../llm/context";
 import { attachPaymentOffer } from "../kinds/palm-offer";
+import { readReportSlots } from "../kinds/palm-report-flow";
+import { asRecord } from "../kinds/shared";
 import type { PalmReadingConfig } from "../kinds/catalog";
 import { classifyTurn, requiresHandoff, type Classification } from "./classify";
 import { evaluateGate } from "./gate";
@@ -161,11 +163,15 @@ export function buildAgentGraph(deps: AgentGraphDeps) {
     }
 
     if (s.input.kind === "palm_reading" && update.reply) {
+      const slots = { ...s.input.session.slots, ...asRecord(s.sessionPatch?.slots) };
+      const report = readReportSlots(slots);
       update = {
         ...update,
         reply: attachPaymentOffer(update.reply, s.input.config as PalmReadingConfig, {
           stage: s.sessionPatch?.stage ?? s.input.session.stage,
           customerText: latestCustomerText(s.input.transcript),
+          reportStage: report.stage,
+          paymentStatus: report.paymentStatus,
         }),
       };
     }
