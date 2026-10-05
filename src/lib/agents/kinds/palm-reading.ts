@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { latestCustomerText, toLangChainMessages, transcriptToText } from "../llm/context";
 import { personaSystemPrompt, withStyle } from "../llm/prompts";
-import { analyzeCustomerImage } from "../payments/receipt";
+import { analyzeCustomerImage, looksLikeReceipt, receiptFingerprint } from "../payments/receipt";
 import { addUsage, ZERO_USAGE, type ChatTurn, type Usage } from "../types";
 import type { PalmReadingConfig } from "./catalog";
 import type { SpecialistContext, SpecialistResult, Specialist } from "./contract";
@@ -115,6 +115,19 @@ function latestCustomerImageTurn(turns: ChatTurn[]): ChatTurn | null {
   return null;
 }
 
+/** Most recent customer photo anywhere in the loaded transcript. */
+function recentCustomerImageTurn(turns: ChatTurn[]): ChatTurn | null {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    if (t.sender === "customer" && t.imageDataUrls?.length) return t;
+  }
+  return null;
+}
+
+function imageTurnToAnalyze(turns: ChatTurn[], allowOlder: boolean): ChatTurn | null {
+  return latestCustomerImageTurn(turns) ?? (allowOlder ? recentCustomerImageTurn(turns) : null);
+}
+
 /** "https://razorpay.me/@askmypalm" → "askmypalm". */
 export function payeeAliases(config: PalmReadingConfig): string[] {
   const handle = config.payment_link.match(/@([A-Za-z0-9._-]+)/)?.[1];
@@ -184,6 +197,8 @@ interface PaidState {
   freeTurns: number;
   /** Remaining paid answers from screenshot-verified packs. */
   packCredits: number;
+  /** Fingerprint of the receipt that unlocked the current/last pack. */
+  packReceiptKey: string | null;
   palmMedia: string[];
 }
 
@@ -210,12 +225,35 @@ function paidResult(
         readings_given: state.readingsGiven,
         free_turns: state.freeTurns,
         pack_credits: state.packCredits,
+        pack_receipt_key: state.packReceiptKey,
         offer_made: state.report.stage !== "none",
         palm_media: state.palmMedia.slice(-4),
         report: state.report,
       },
     },
   };
+}
+
+async function alreadyReceivedScreenshot(
+  ctx: SpecialistContext<"palm_reading">,
+  state: PaidState,
+  usage: Usage,
+  steps: string[],
+): Promise<SpecialistResult> {
+  const { config } = ctx;
+  if (state.packCredits > 0) {
+    const r = await say(
+      ctx,
+      `You re-checked their payment screenshot. It is the same payment already received. Tell them that kindly. They still have ${state.packCredits} paid reading${state.packCredits === 1 ? "" : "s"} left — ask for a palm photo or their next question. Do not unlock more readings and do not ask for another payment.`,
+    );
+    return paidResult(state, { reply: r.text, usage: addUsage(usage, r.usage), steps, stage: "reading_given" });
+  }
+  if (state.report.stage === "none") state.report = { ...state.report, stage: "offered", offeredAt: ctx.now.toISOString() };
+  const r = await say(
+    ctx,
+    `You re-checked their payment screenshot. It is the same payment that already unlocked a pack they have used up. Do not unlock more readings. Kindly explain they need a new payment of ₹${config.report_price_inr} for ${packSize(config)} more readings, then close the sale: ${offerScript(config)}`,
+  );
+  return paidResult(state, { reply: r.text, usage: addUsage(usage, r.usage), steps, stage: "awaiting_payment" });
 }
 
 async function handlePaymentScreenshot(
@@ -226,6 +264,15 @@ async function handlePaymentScreenshot(
   usage: Usage,
 ): Promise<SpecialistResult> {
   const { config } = ctx;
+  const key = receiptFingerprint(analysis);
+  const knownRepeat =
+    Boolean(key && state.packReceiptKey && key === state.packReceiptKey) ||
+    Boolean(!key && state.report.paymentId && state.packCredits > 0);
+
+  if (knownRepeat) {
+    return alreadyReceivedScreenshot(ctx, state, usage, ["palm:payment:repeat"]);
+  }
+
   const refs = ctx.refs ?? { conversationId: ctx.conversationKey, contactId: "", userId: "" };
   const { decision, paymentId } = await ctx.services.payments.check({
     agent: ctx.agent,
@@ -243,6 +290,10 @@ async function handlePaymentScreenshot(
   });
   const steps = [`palm:payment:${decision.status}`];
 
+  if (paymentId && state.report.paymentId && paymentId === state.report.paymentId) {
+    return alreadyReceivedScreenshot(ctx, state, usage, [...steps, "palm:payment:repeat"]);
+  }
+
   if (decision.status === "rejected") {
     const rejections = state.report.rejections + 1;
     state.report = { ...state.report, stage: "offered", rejections };
@@ -258,6 +309,7 @@ async function handlePaymentScreenshot(
 
   const unlocked = packSize(config);
   state.packCredits += unlocked;
+  state.packReceiptKey = key ?? state.packReceiptKey;
   state.report = {
     ...state.report,
     stage: "none",
@@ -407,10 +459,12 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     readingsGiven,
     freeTurns: initialFreeTurns({ slots, readingsGiven, transcript }),
     packCredits: Number(slots.pack_credits ?? 0) || 0,
+    packReceiptKey: typeof slots.pack_receipt_key === "string" ? slots.pack_receipt_key : null,
     palmMedia: palmMediaFromSlots(slots),
   };
   const limit = Math.max(1, config.upsell_after_readings);
-  const imageTurn = latestCustomerImageTurn(transcript);
+  const askingPayment = wantsPaidPlan(latestCustomerText(transcript));
+  const imageTurn = imageTurnToAnalyze(transcript, askingPayment);
   const photo = imageTurn?.imageDataUrls?.[0] ?? null;
 
   if (state.report.stage === "queued") {
@@ -437,7 +491,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
       ctx.runnableConfig,
     );
     const imageStep = `palm:image:${analysis.data.image_type}`;
-    if (analysis.data.image_type === "payment_receipt") {
+    if (looksLikeReceipt(analysis.data)) {
       const result = await handlePaymentScreenshot(ctx, state, analysis.data, imageTurn, analysis.usage);
       return { ...result, steps: [imageStep, ...result.steps] };
     }

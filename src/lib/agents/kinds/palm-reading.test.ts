@@ -2,7 +2,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import { describe, expect, it } from "vitest";
 
 import type { ImageAnalysis } from "../payments/receipt";
-import { customer, emptySession, fakeLlm, systemText, testAgent, testRuntime, testServices } from "../testing/fakes";
+import { bot, customer, emptySession, fakeLlm, systemText, testAgent, testRuntime, testServices } from "../testing/fakes";
 import type { ChatTurn, SessionState } from "../types";
 import { parseAgentConfig } from "./catalog";
 import type { ReportRequest, SpecialistServices } from "./contract";
@@ -297,11 +297,66 @@ describe("palm paid report flow", () => {
     const r = await result;
     expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:verified", "palm:pack_unlocked"]);
     expect(slotsOf(r).pack_credits).toBe(5);
+    expect(slotsOf(r).pack_receipt_key).toBe("utr:612345678901");
     expect(reportOf(r)).toMatchObject({ stage: "none", paymentId: "TEST-PAYMENT", paymentStatus: "verified" });
     expect(prompts[0]).toContain("Payment is confirmed");
     expect(prompts[0]).toContain("5 more palm reading");
     expect(prompts[0]).not.toContain("date of birth");
     expect(r.reply).not.toContain("razorpay.me");
+  });
+
+  it("re-analyzes a repeated screenshot and does not unlock another pack", async () => {
+    const session = emptySession({
+      slots: {
+        readings_given: 5,
+        pack_credits: 4,
+        pack_receipt_key: "utr:612345678901",
+        report: { stage: "none", paymentId: "TEST-PAYMENT", paymentStatus: "verified" },
+      },
+    });
+    const { result, prompts } = run([photo("m7-again")], session, { image: goodReceipt });
+    const r = await result;
+    expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:repeat"]);
+    expect(slotsOf(r).pack_credits).toBe(4);
+    expect(prompts[0]).toContain("same payment");
+    expect(r.reply).not.toContain("razorpay.me");
+  });
+
+  it("treats a receipt-like 'other' image as a payment screenshot", async () => {
+    const session = emptySession({ slots: { readings_given: 5, report: { stage: "offered", offeredAt: "2026-09-30T09:00:00Z" } } });
+    const r = await run([photo("gpay")], session, { image: { ...goodReceipt, image_type: "other" } }).result;
+    expect(r.steps).toEqual(["palm:image:other", "palm:payment:verified", "palm:pack_unlocked"]);
+    expect(slotsOf(r).pack_credits).toBe(5);
+  });
+
+  it("re-checks the last screenshot when they say they already paid", async () => {
+    const session = emptySession({ slots: { readings_given: 5, report: { stage: "offered", offeredAt: "2026-09-30T09:00:00Z" } } });
+    const { result, llm } = run(
+      [photo("pay-1"), bot("Please send the payment screenshot."), customer("I already sent the payment screenshot")],
+      session,
+      { image: goodReceipt },
+    );
+    const r = await result;
+    expect(llm.calls.some((c) => c.name === "analyze_customer_image")).toBe(true);
+    expect(r.steps).toContain("palm:pack_unlocked");
+    expect(slotsOf(r).pack_credits).toBe(5);
+  });
+
+  it("asks for a new payment when they resend a screenshot that already unlocked a used pack", async () => {
+    const session = emptySession({
+      slots: {
+        readings_given: 5,
+        pack_credits: 0,
+        pack_receipt_key: "utr:612345678901",
+        report: { stage: "offered", paymentId: "TEST-PAYMENT", paymentStatus: "verified" },
+      },
+    });
+    const { result, prompts } = run([photo("old-pay")], session, { image: goodReceipt });
+    const r = await result;
+    expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:repeat"]);
+    expect(slotsOf(r).pack_credits).toBe(0);
+    expect(prompts[0]).toContain("new payment");
+    expect(r.reply).toContain("https://razorpay.me/@askmypalm");
   });
 
   it("decrements pack credits on a follow-up and does not pin the offer", async () => {

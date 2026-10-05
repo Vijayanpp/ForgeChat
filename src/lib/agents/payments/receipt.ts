@@ -30,9 +30,33 @@ export type ImageAnalysis = z.infer<typeof imageAnalysisSchema>;
 const PROMPT = `You inspect one image a customer sent on WhatsApp to a palm-reading business.
 
 1. Classify it: a photo of a palm/hand, a payment receipt/confirmation screenshot, or other.
-2. If it is a payment receipt, transcribe the fields EXACTLY as displayed. Never guess or complete partially visible values; leave a field empty (or amount 0) if it is not clearly readable.
-3. Judge edit_suspicion honestly: look for inconsistent fonts, spacing or alignment around the amount, payee, date and transaction ids, pasted patches, or blur limited to key fields.
+2. UPI apps (GPay, PhonePe, Paytm), Razorpay, bank apps, and the same payment screenshot sent again are payment_receipt — even if you have seen a similar image before.
+3. If it is a payment receipt, transcribe the fields EXACTLY as displayed. Never guess or complete partially visible values; leave a field empty (or amount 0) if it is not clearly readable.
+4. Judge edit_suspicion honestly: look for inconsistent fonts, spacing or alignment around the amount, payee, date and transaction ids, pasted patches, or blur limited to key fields.
 If it is not a receipt, set payment_status=unknown, amount=0 and leave receipt fields empty.`;
+
+/** Receipt-like even when the model labels the image "other". */
+export function looksLikeReceipt(analysis: ImageAnalysis): boolean {
+  if (analysis.image_type === "payment_receipt") return true;
+  if (analysis.payment_status === "success" || analysis.payment_status === "pending" || analysis.payment_status === "failed") {
+    return true;
+  }
+  if (analysis.amount > 0) return true;
+  return Boolean(analysis.utr.trim() || analysis.razorpay_payment_id.trim());
+}
+
+/** Stable id for "they sent this same payment again". */
+export function receiptFingerprint(analysis: ImageAnalysis): string | null {
+  const pay = analysis.razorpay_payment_id.trim();
+  if (/^pay_[A-Za-z0-9]{14}$/.test(pay)) return pay;
+  const utr = analysis.utr.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  if (utr.length >= 10) return `utr:${utr}`;
+  const amount = analysis.amount > 0 ? String(Math.round(analysis.amount)) : "";
+  const when = analysis.paid_at.trim();
+  const payee = analysis.payee_name.trim().toLowerCase();
+  if (amount && (when || payee)) return `amt:${amount}|at:${when}|p:${payee}`;
+  return null;
+}
 
 export async function analyzeCustomerImage(
   llm: LlmToolkit,
