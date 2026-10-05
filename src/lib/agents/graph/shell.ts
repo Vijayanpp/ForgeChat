@@ -91,7 +91,7 @@ export function buildAgentGraph(deps: AgentGraphDeps) {
         input.config.business_name ? ` for ${input.config.business_name}` : ""
       }${
         "paid_report_enabled" in input.config && input.config.paid_report_enabled
-          ? ". Also in scope: paying for the detailed report, payment screenshots, and sharing name, birth date/time/place and email for it"
+          ? ". Also in scope: paying for more palm readings and sending a payment screenshot"
           : ""
       }`,
       handoffKeywords: input.config.handoff_keywords,
@@ -172,6 +172,7 @@ export function buildAgentGraph(deps: AgentGraphDeps) {
           customerText: latestCustomerText(s.input.transcript),
           reportStage: report.stage,
           paymentStatus: report.paymentStatus,
+          packCredits: Number(slots.pack_credits ?? 0) || 0,
         }),
       };
     }

@@ -7,7 +7,7 @@ import { analyzeCustomerImage } from "../payments/receipt";
 import { addUsage, ZERO_USAGE, type ChatTurn, type Usage } from "../types";
 import type { PalmReadingConfig } from "./catalog";
 import type { SpecialistContext, SpecialistResult, Specialist } from "./contract";
-import { attachPaymentOffer, offerScript, paymentFactsForPrompt, wantsPaidPlan } from "./palm-offer";
+import { attachPaymentOffer, offerScript, packSize, paymentFactsForPrompt, wantsPaidPlan } from "./palm-offer";
 import {
   decideDetailsAction,
   DETAIL_LABELS,
@@ -182,6 +182,8 @@ interface PaidState {
   readingsGiven: number;
   /** Palm photos + answered questions. The paid offer fires when this hits the free limit. */
   freeTurns: number;
+  /** Remaining paid answers from screenshot-verified packs. */
+  packCredits: number;
   palmMedia: string[];
 }
 
@@ -195,6 +197,7 @@ function paidResult(
           stage: out.stage,
           reportStage: state.report.stage,
           paymentStatus: state.report.paymentStatus,
+          packCredits: state.packCredits,
         })
       : out.reply,
     handoff: out.handoff,
@@ -206,6 +209,7 @@ function paidResult(
         ...state.slots,
         readings_given: state.readingsGiven,
         free_turns: state.freeTurns,
+        pack_credits: state.packCredits,
         offer_made: state.report.stage !== "none",
         palm_media: state.palmMedia.slice(-4),
         report: state.report,
@@ -252,22 +256,29 @@ async function handlePaymentScreenshot(
     return paidResult(state, { reply: r.text, usage: addUsage(usage, r.usage), steps, stage: "awaiting_payment" });
   }
 
+  const unlocked = packSize(config);
+  state.packCredits += unlocked;
   state.report = {
     ...state.report,
-    stage: "collecting",
+    stage: "none",
     paymentId,
     paymentStatus: decision.status,
+    rejections: 0,
   };
-  const ask = (Object.keys(DETAIL_LABELS) as (keyof BirthDetails)[])
-    .filter((k) => !state.report.details[k])
-    .map((k, i) => `${i + 1}. ${DETAIL_LABELS[k]}`)
-    .join("\n");
   const instruction =
     decision.status === "verified"
-      ? `Payment is confirmed ✅. Thank them warmly. To prepare their detailed Vedic astrology + palm report, ask them to share (numbered, in one message):\n${ask}\nSay they can send it all in one message.`
-      : `Thank them for the payment screenshot. Say the team is verifying the payment and it usually doesn't take long. Meanwhile, to prepare their detailed report, ask them to share (numbered, in one message):\n${ask}`;
+      ? `Payment is confirmed ✅. Thank them warmly. They now have ${state.packCredits} more palm reading${state.packCredits === 1 ? "" : "s"} (photos or questions). Ask them to send a palm photo or their next question. Do not ask for birth details or mention an emailed report.`
+      : `Thank them for the payment screenshot. Say the team is verifying it and it usually doesn't take long. Meanwhile they can use ${state.packCredits} more palm reading${state.packCredits === 1 ? "" : "s"} — ask for a palm photo or their next question. Do not ask for birth details or mention an emailed report.`;
   const r = await say(ctx, instruction);
-  return paidResult(state, { reply: r.text, usage: addUsage(usage, r.usage), steps, stage: "collecting_details" });
+  return paidResult(state, { reply: r.text, usage: addUsage(usage, r.usage), steps: [...steps, "palm:pack_unlocked"], stage: "reading_given" });
+}
+
+/** Spend one paid credit. Returns true when the pack is now empty and we should sell again. */
+function spendPackCredit(state: PaidState, now: Date): boolean {
+  state.packCredits = Math.max(0, state.packCredits - 1);
+  if (state.packCredits > 0) return false;
+  state.report = { ...state.report, stage: "offered", offeredAt: now.toISOString() };
+  return true;
 }
 
 async function handleDetails(ctx: SpecialistContext<"palm_reading">, state: PaidState): Promise<SpecialistResult> {
@@ -395,6 +406,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     report: readReportSlots(slots),
     readingsGiven,
     freeTurns: initialFreeTurns({ slots, readingsGiven, transcript }),
+    packCredits: Number(slots.pack_credits ?? 0) || 0,
     palmMedia: palmMediaFromSlots(slots),
   };
   const limit = Math.max(1, config.upsell_after_readings);
@@ -414,7 +426,8 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     return handleDetails(ctx, state);
   }
 
-  const paidPhase = state.report.stage === "offered" || state.freeTurns >= limit;
+  const hasCredits = state.packCredits > 0;
+  const paidPhase = !hasCredits && (state.report.stage === "offered" || state.freeTurns >= limit);
 
   if (photo && imageTurn) {
     const analysis = await analyzeCustomerImage(
@@ -427,6 +440,40 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     if (analysis.data.image_type === "payment_receipt") {
       const result = await handlePaymentScreenshot(ctx, state, analysis.data, imageTurn, analysis.usage);
       return { ...result, steps: [imageStep, ...result.steps] };
+    }
+
+    if (hasCredits) {
+      if (analysis.data.image_type !== "palm") {
+        const r = await say(
+          ctx,
+          `The image is not a palm photo. Kindly ask for a clear palm photo. They still have ${state.packCredits} paid reading${state.packCredits === 1 ? "" : "s"} left. Do not give a palm reading from this image.`,
+        );
+        return paidResult(state, {
+          reply: r.text,
+          usage: addUsage(analysis.usage, r.usage),
+          steps: [imageStep],
+          stage: "reading_given",
+        });
+      }
+      state.readingsGiven += 1;
+      if (imageTurn.mediaUrl) state.palmMedia = [...state.palmMedia.filter((m) => m !== imageTurn.mediaUrl), imageTurn.mediaUrl];
+      const offerNow = spendPackCredit(state, ctx.now);
+      const remaining = state.packCredits;
+      const r = await say(
+        ctx,
+        `${MODE_INSTRUCTIONS.reading} This is a paid reading. They have ${remaining} reading${remaining === 1 ? "" : "s"} left in this pack.${
+          offerNow
+            ? `]\n[This was the last reading in their pack. After the reading, close the sale for another pack: ${offerScript(config)}`
+            : " They can send another palm photo or ask a question. Do not mention the paid plan unless they ask for it."
+        }`,
+        { vision: true, maxTokens: 900 },
+      );
+      return paidResult(state, {
+        reply: r.text,
+        usage: addUsage(analysis.usage, r.usage),
+        steps: [imageStep, "palm:reading", ...(offerNow ? ["palm:offer"] : [])],
+        stage: offerNow ? "awaiting_payment" : "reading_given",
+      });
     }
 
     if (paidPhase) {
@@ -448,7 +495,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     if (analysis.data.image_type !== "palm") {
       const r = await say(
         ctx,
-        `The image is not a palm photo. Kindly ask for a clear palm photo for a free reading. If they meant to pay for the detailed report, ask them to send the payment screenshot of ₹${config.report_price_inr}. Do not give a palm reading from this image.`,
+        `The image is not a palm photo. Kindly ask for a clear palm photo for a free reading. If they meant to pay for more readings, ask them to send the payment screenshot of ₹${config.report_price_inr}. Do not give a palm reading from this image.`,
       );
       return paidResult(state, {
         reply: r.text,
@@ -468,7 +515,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
       ctx,
       `${MODE_INSTRUCTIONS.reading} This is free reading ${state.freeTurns} of ${limit}.${
         offerNow
-          ? `]\n[This was their last free reading. After the reading, close the sale with the detailed personalized Vedic astrology + palm report (emailed to them): ${offerScript(config)}`
+          ? `]\n[This was their last free reading. After the reading, close the sale for ${packSize(config)} more readings: ${offerScript(config)}`
           : ` They have ${remaining} free reading${remaining === 1 ? "" : "s"} left; they can send another palm photo (e.g. the other hand) or ask a question. Do not mention the paid plan unless they ask for it.`
       }`,
       { vision: true, maxTokens: 900 },
@@ -477,6 +524,31 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
       reply: r.text,
       usage: addUsage(analysis.usage, r.usage),
       steps: [imageStep, "palm:reading", ...(offerNow ? ["palm:offer"] : [])],
+      stage: offerNow ? "awaiting_payment" : "reading_given",
+    });
+  }
+
+  if (hasCredits) {
+    const askingForPlan = wantsPaidPlan(latestCustomerText(transcript));
+    if (askingForPlan) {
+      const r = await say(
+        ctx,
+        `${MODE_INSTRUCTIONS.follow_up} They still have ${state.packCredits} paid reading${state.packCredits === 1 ? "" : "s"} left. Answer briefly and remind them they can send a palm photo or another question. Do not sell another pack unless they insist they want more after these.`,
+      );
+      return paidResult(state, { reply: r.text, usage: r.usage, steps: ["palm:follow_up"], stage: "reading_given" });
+    }
+    const offerNow = spendPackCredit(state, ctx.now);
+    const remaining = state.packCredits;
+    const r = await say(
+      ctx,
+      offerNow
+        ? `${MODE_INSTRUCTIONS.follow_up} This was the last reading in their pack. Answer their question, then close the sale for another pack. Never send them to a website. ${offerScript(config)}`
+        : `${MODE_INSTRUCTIONS.follow_up} This is a paid answer. They have ${remaining} reading${remaining === 1 ? "" : "s"} left in this pack. They can send a palm photo or ask another question. Do not mention the paid plan unless they ask for it.`,
+    );
+    return paidResult(state, {
+      reply: r.text,
+      usage: r.usage,
+      steps: ["palm:follow_up", ...(offerNow ? ["palm:offer"] : [])],
       stage: offerNow ? "awaiting_payment" : "reading_given",
     });
   }
@@ -510,7 +582,7 @@ async function runPaidFlow(ctx: SpecialistContext<"palm_reading">): Promise<Spec
     ctx,
     state.report.stage === "offered" || askingForPlan
       ? `${MODE_INSTRUCTIONS.follow_up} Close the sale with the paid plan. Never send them to a website. ${offerScript(config)} If they say they've paid, ask for the payment screenshot — never treat their words alone as proof of payment.`
-      : `${MODE_INSTRUCTIONS.follow_up} This is free answer ${state.freeTurns} of ${limit}. They have ${remaining} left. They can send a palm photo or ask another question. If they ask for a detailed report, sell the paid plan with the exact price and payment URL — never a website.`,
+      : `${MODE_INSTRUCTIONS.follow_up} This is free answer ${state.freeTurns} of ${limit}. They have ${remaining} left. They can send a palm photo or ask another question. If they ask for more readings, sell the paid plan with the exact price and payment URL — never a website.`,
   );
   return paidResult(state, {
     reply: r.text,

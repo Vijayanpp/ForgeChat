@@ -32,17 +32,21 @@ export const customerServiceConfigSchema = baseConfig.extend({
 });
 
 export const palmReadingConfigSchema = baseConfig.extend({
-  offer_name: z.string().trim().max(120).optional().default("Detailed personal reading"),
+  offer_name: z.string().trim().max(120).optional().default("5 more palm readings"),
   offer_price: z.string().trim().max(60).optional().default(""),
   offer_link: optionalHttpsUrl,
   /** Free answers (palm photos + follow-up questions) before the paid offer. */
   upsell_after_readings: z.number().int().min(0).max(10).optional().default(1),
   /**
-   * Paid report flow: payment screenshot → verification → birth details
-   * → generated HTML report emailed to the customer.
+   * Paid reading packs: payment screenshot → unlock N more answers,
+   * then offer the same pack again. Legacy birth-detail / emailed-report
+   * chats still complete if already in that session stage.
    */
   paid_report_enabled: z.boolean().optional().default(false),
-  report_price_inr: z.number().int().min(1).max(100_000).optional().default(499),
+  /** Pack price. Field name kept so existing agent rows do not need a migration. */
+  report_price_inr: z.number().int().min(1).max(100_000).optional().default(50),
+  /** Readings (photos + questions) unlocked by one payment. */
+  pack_size: z.number().int().min(1).max(20).optional().default(5),
   payment_link: z.preprocess(
     (v) => (typeof v === "string" && v.trim() && !/^[a-z]+:\/\//i.test(v.trim()) ? `https://${v.trim()}` : v),
     optionalHttpsUrl,
@@ -58,7 +62,7 @@ export const palmReadingConfigSchema = baseConfig.extend({
     ctx.addIssue({
       code: "custom",
       path: ["payment_link"],
-      message: "Payment link is required when Paid detailed report is on",
+      message: "Payment link is required when paid reading packs are on",
     });
   }
 });

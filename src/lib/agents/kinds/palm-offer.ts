@@ -11,7 +11,11 @@ export function planPrice(config: PalmReadingConfig): string {
 }
 
 export function planName(config: PalmReadingConfig): string {
-  return config.offer_name || "Personalized Vedic Astrology & Palm Report";
+  return config.offer_name || "5 more palm readings";
+}
+
+export function packSize(config: PalmReadingConfig): number {
+  return Math.max(1, config.pack_size);
 }
 
 /** The block we pin onto WhatsApp messages. Never markdown. */
@@ -26,22 +30,24 @@ export function planBlock(config: PalmReadingConfig): string {
 export function offerScript(config: PalmReadingConfig): string {
   const price = planPrice(config);
   const link = planLink(config);
+  const readings = packSize(config);
   const pay = link
     ? `Write this exact URL as plain text on its own line (never as markdown): ${link}`
     : "The payment link is missing from agent settings — do not invent a website or another URL.";
-  return `SELL THIS PLAN (copy these facts; do not invent others): ${planName(config)} for ${price}. ${pay}. After they pay, they must send the payment screenshot in this same chat.
+  return `SELL THIS PLAN (copy these facts; do not invent others): ${planName(config)} — ${readings} more palm readings for ${price}. ${pay}. After they pay, they must send the payment screenshot in this same chat.
 Hard rules:
-- This reply MUST include the price ${price}${link ? ` and the raw URL ${link}` : ""}.
+- This reply MUST include the price ${price}, that they get ${readings} more readings${link ? `, and the raw URL ${link}` : ""}.
 - Never write markdown links such as [payment link](#) or [payment link](url). WhatsApp will not open them.
 - Never say "visit our website", "Askmypalm website", "reach out to our team", "contact us", or "learn more about the process". There is no website checkout — payment is only via the Razorpay link in this chat.
 - Never invent a different price, plan, or URL.
+- Do not mention an emailed report, a Vedic chart, or birth details.
 - Two or three warm Guruji sentences, then the price, then the raw URL, then "send the payment screenshot here".`;
 }
 
 export function paymentFactsForPrompt(config: PalmReadingConfig): string {
   const link = planLink(config);
   const price = planPrice(config);
-  return `\n\n[Paid plan facts — use ONLY when this turn is actually selling the report. If payment is already received, or you are giving a free reading, or collecting birth details, do not mention the price or payment link.]\nName: ${planName(config)}\nPrice: ${price}${
+  return `\n\n[Paid plan facts — use ONLY when this turn is actually selling more readings. If they still have paid readings left, or you are giving a free reading, do not mention the price or payment link.]\nName: ${planName(config)}\nPrice: ${price} for ${packSize(config)} more readings${
     link ? `\nPay here: ${link}` : ""
   }\nAfter paying they send the payment screenshot in this chat. Never send them to a website.`;
 }
@@ -74,7 +80,7 @@ export function withPaymentOffer(reply: string, config: PalmReadingConfig): stri
 }
 
 const SELL_TALK =
-  /report|payment|\bpay\b|razorpay|\bplan\b|₹|rs\.?\s*\d|screenshot|purchase|\bbuy\b|price|399|499|\blink\b|website/i;
+  /report|payment|\bpay\b|razorpay|\bplan\b|₹|rs\.?\s*\d|screenshot|purchase|\bbuy\b|price|50|399|499|\blink\b|website/i;
 
 export function wantsPaidPlan(text: string): boolean {
   return SELL_TALK.test(text) || /\]\(\s*#?\s*\)/.test(text);
@@ -99,16 +105,13 @@ export function attachPaymentOffer(
     customerText?: string;
     reportStage?: string;
     paymentStatus?: string | null;
+    packCredits?: number;
   } = {},
 ): string | null {
   if (!reply) return reply;
   const stage = ctx.stage ?? "";
-  const alreadyPaid =
-    ctx.paymentStatus === "verified" ||
-    ctx.paymentStatus === "pending_review" ||
-    PAID_REPORT_STAGES.has(ctx.reportStage ?? "") ||
-    SKIP_PLAN.has(stage);
-  if (alreadyPaid) return stripWebsitePitch(reply);
+  const inReportFlow = PAID_REPORT_STAGES.has(ctx.reportStage ?? "") || SKIP_PLAN.has(stage);
+  if (inReportFlow || (ctx.packCredits ?? 0) > 0) return stripWebsitePitch(reply);
 
   const selling =
     stage === "awaiting_payment" || stage === "offer_made" || wantsPaidPlan(ctx.customerText ?? "");

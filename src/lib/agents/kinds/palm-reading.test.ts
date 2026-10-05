@@ -74,7 +74,7 @@ const photo = (id: string): ChatTurn =>
 const goodReceipt: ImageAnalysis = {
   image_type: "payment_receipt",
   payment_status: "success",
-  amount: 499,
+  amount: 50,
   currency: "INR",
   payee_name: "AskMyPalm",
   payee_handle: "",
@@ -147,34 +147,36 @@ describe("palm paid report flow", () => {
   });
 
   it("offer script names the price and Razorpay link and forbids a website pitch", () => {
-    const script = offerScript({ ...config, report_price_inr: 399 });
-    expect(script).toContain("₹399");
+    const script = offerScript(config);
+    expect(script).toContain("₹50");
+    expect(script).toContain("5 more");
     expect(script).toContain("https://razorpay.me/@askmypalm");
     expect(script).toContain("Never say \"visit our website\"");
     expect(script).toContain("[payment link](#)");
+    expect(script).toContain("emailed report");
   });
 
   it("replaces placeholder markdown links with the real Razorpay URL", () => {
     const fake = "You can follow this [payment link](#) to proceed.";
-    const out = withPaymentOffer(fake, { ...config, report_price_inr: 399 });
+    const out = withPaymentOffer(fake, config);
     expect(out).not.toContain("[payment link]");
     expect(out).not.toContain("(#)");
     expect(out).toContain("https://razorpay.me/@askmypalm");
-    expect(out).toContain("₹399");
+    expect(out).toContain("₹50");
   });
 
-  it("replaces a website pitch with the ₹399 Razorpay plan", () => {
+  it("replaces a website pitch with the ₹50 Razorpay pack", () => {
     const website =
       "I'm glad you're interested. You can visit our Askmypalm website and purchase the report there.";
-    const out = withPaymentOffer(website, { ...config, report_price_inr: 399 });
+    const out = withPaymentOffer(website, config);
     expect(out.toLowerCase()).not.toMatch(/visit our|askmypalm website/);
-    expect(out).toContain("₹399");
+    expect(out).toContain("₹50");
     expect(out).toContain("https://razorpay.me/@askmypalm");
     expect(out).toContain("payment screenshot");
   });
 
   it("does not duplicate the link when the model already pasted it", () => {
-    const ok = "Pay ₹499 here:\nhttps://razorpay.me/@askmypalm";
+    const ok = "Pay ₹50 here:\nhttps://razorpay.me/@askmypalm";
     expect(withPaymentOffer(ok, config)).toBe(ok);
   });
 
@@ -196,6 +198,14 @@ describe("palm paid report flow", () => {
     expect(out).not.toContain("razorpay.me");
   });
 
+  it("does not pin the plan while paid pack credits remain", () => {
+    const out = attachPaymentOffer("Here is your next reading.", config, {
+      stage: "reading_given",
+      packCredits: 4,
+    });
+    expect(out).not.toContain("razorpay.me");
+  });
+
   it("does not pin the plan on ordinary chat just because paid reports are on", () => {
     const out = attachPaymentOffer("Here is your free reading.", config, { stage: "reading_given" });
     expect(out).not.toContain("razorpay.me");
@@ -203,8 +213,9 @@ describe("palm paid report flow", () => {
 
   it("accepts a payment screenshot before the free readings are finished", async () => {
     const r = await run([photo("pay-early")], emptySession(), { image: goodReceipt }).result;
-    expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:verified"]);
-    expect(reportOf(r)).toMatchObject({ stage: "collecting", paymentStatus: "verified" });
+    expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:verified", "palm:pack_unlocked"]);
+    expect(slotsOf(r).pack_credits).toBe(5);
+    expect(reportOf(r)).toMatchObject({ stage: "none", paymentStatus: "verified" });
     expect(r.reply).not.toContain("razorpay.me");
   });
 
@@ -217,7 +228,7 @@ describe("palm paid report flow", () => {
     expect(reportOf(r)).toMatchObject({ stage: "offered", offeredAt: NOW.toISOString() });
     expect(prompts[0]).toContain("free reading 5 of 5");
     expect(prompts[0]).toContain("https://razorpay.me/@askmypalm");
-    expect(prompts[0]).toContain("₹499");
+    expect(prompts[0]).toContain("₹50");
     expect(r.reply).toContain("https://razorpay.me/@askmypalm");
   });
 
@@ -280,14 +291,53 @@ describe("palm paid report flow", () => {
     expect(prompts[0]).toContain("Do not give a new reading");
   });
 
-  it("verifies a payment screenshot and asks for birth details", async () => {
+  it("verifies a payment screenshot and unlocks a reading pack", async () => {
     const session = emptySession({ slots: { readings_given: 5, report: { stage: "offered", offeredAt: "2026-09-30T09:00:00Z" } } });
     const { result, prompts } = run([photo("m7")], session, { image: goodReceipt });
     const r = await result;
-    expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:verified"]);
-    expect(reportOf(r)).toMatchObject({ stage: "collecting", paymentId: "TEST-PAYMENT", paymentStatus: "verified" });
+    expect(r.steps).toEqual(["palm:image:payment_receipt", "palm:payment:verified", "palm:pack_unlocked"]);
+    expect(slotsOf(r).pack_credits).toBe(5);
+    expect(reportOf(r)).toMatchObject({ stage: "none", paymentId: "TEST-PAYMENT", paymentStatus: "verified" });
     expect(prompts[0]).toContain("Payment is confirmed");
-    expect(prompts[0]).toContain("date of birth");
+    expect(prompts[0]).toContain("5 more palm reading");
+    expect(prompts[0]).not.toContain("date of birth");
+    expect(r.reply).not.toContain("razorpay.me");
+  });
+
+  it("decrements pack credits on a follow-up and does not pin the offer", async () => {
+    const r = await run(
+      [customer("What about my career?")],
+      emptySession({ slots: { readings_given: 1, free_turns: 5, pack_credits: 4, report: { stage: "none" } } }),
+    ).result;
+    expect(r.steps).toEqual(["palm:follow_up"]);
+    expect(slotsOf(r).pack_credits).toBe(3);
+    expect(reportOf(r).stage).toBe("none");
+    expect(r.reply).not.toContain("razorpay.me");
+  });
+
+  it("offers another pack when the last paid credit is used", async () => {
+    const { result, prompts } = run(
+      [customer("And my health?")],
+      emptySession({ slots: { readings_given: 1, free_turns: 5, pack_credits: 1, report: { stage: "none" } } }),
+    );
+    const r = await result;
+    expect(r.steps).toEqual(["palm:follow_up", "palm:offer"]);
+    expect(slotsOf(r).pack_credits).toBe(0);
+    expect(reportOf(r)).toMatchObject({ stage: "offered", offeredAt: NOW.toISOString() });
+    expect(prompts[0]).toContain("last reading in their pack");
+    expect(prompts[0]).toContain("https://razorpay.me/@askmypalm");
+    expect(r.reply).toContain("https://razorpay.me/@askmypalm");
+  });
+
+  it("gives a paid palm reading while credits remain", async () => {
+    const r = await run(
+      [photo("pack-1")],
+      emptySession({ slots: { readings_given: 1, free_turns: 5, pack_credits: 3, palm_media: ["wa:m1"] } }),
+    ).result;
+    expect(r.steps).toEqual(["palm:image:palm", "palm:reading"]);
+    expect(slotsOf(r)).toMatchObject({ readings_given: 2, pack_credits: 2, palm_media: ["wa:m1", "wa:pack-1"] });
+    expect(reportOf(r).stage).toBe("none");
+    expect(r.reply).not.toContain("razorpay.me");
   });
 
   it("hands off after three rejected screenshots", async () => {
